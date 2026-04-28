@@ -1,10 +1,30 @@
+# Project Description
+
+Our group will develop a friendly user interface prototype designed for non-security
+professionals to deploy systems to AWS securely. The application will leverage the Gemini API
+to translate natural language prompts into secure cloud configurations. By allowing users to
+describe their needs in plain language, we make complex tasks easier. This ensures that users
+with little to no technical expertise can still use the functionality that AWS offers.
+
+The interface will feature a chat-based assistant where users can ask questions and trigger the
+programmatic setup of various AWS services. To maintain high security standards, the system
+will identify "necessary inputs" that cannot be inferred, such as specific privacy settings or
+authentication credentials, and prompt the user for manual selection. For these manual choices,
+the interface will provide explanations to educate the user on the security implications of their
+decisions. The final system will demonstrate how combining Large Language Models (LLMs)
+with AWS domain language can automate the creation of a reliable, secure cloud environment
+for non-technical users.
+
+
 # Project Setup
 
 You will need to create a Gemini API Key in Google AI Studio, and replace it with the placeholder in the .env file.
 
 ### .env file creation
 
+```bash
 GEMINI_API_KEY="your_api_key_here"
+```
 
 ## Run the Frontend
 
