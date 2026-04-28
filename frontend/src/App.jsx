@@ -106,6 +106,20 @@ function App() {
               ? "Connecting..."
               : "Connect to AWS"}
         </button>
+
+        {/* explain the button */}
+        <div className="max-w-[300px] pt-[3vh] text-xs text-gray-400 leading-relaxed mt-2 space-y-4">
+          <p>
+            <strong>How it works:</strong> Clicking this creates a secure
+            "handshake" (IAM Role) in your AWS account. We never store your
+            passwords or keys. You remain in full control and can revoke access
+            instantly from your AWS console at any time. <break />
+          </p>
+          <p>
+            Make sure you are logged into your AWS Management Console before
+            clicking this button.
+          </p>
+        </div>
       </aside>
 
       {/* chat panel */}
@@ -126,7 +140,7 @@ function App() {
                         ? "bg-white text-black rounded-br-none shadow-sm"
                         : msg.role === "system"
                           ? "bg-gray-200 text-gray-700 w-full text-center rounded-xl font-bold text-xs uppercase tracking-wider"
-                          : "bg-white text-black rounded-bl-none shadow-sm"
+                          : "bg-[#C1C4FF] text-black rounded-bl-none shadow-sm"
                     }`}
                   >
                     {msg.text}

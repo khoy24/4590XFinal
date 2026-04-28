@@ -1,5 +1,11 @@
 # Project Setup
 
+You will need to create a Gemini API Key in Google AI Studio, and replace it with the placeholder in the .env file.
+
+### .env file creation
+
+GEMINI_API_KEY="your_api_key_here"
+
 ## Run the Frontend
 
 ```bash
