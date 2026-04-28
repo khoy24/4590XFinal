@@ -16,8 +16,8 @@ if not gemini_api_key:
 
 genai.configure(api_key=gemini_api_key)
 
-# right now use gemini-1.5-flash as it is fast and cheap
-model = genai.GenerativeModel('gemini-1.5-flash') 
+# right now use gemini-2.5-flash as it is fast and cheap
+model = genai.GenerativeModel('gemini-2.5-flash') 
 
 # initialize FastAPI App
 app = FastAPI(title="Cloud Deployment Assistant API")
