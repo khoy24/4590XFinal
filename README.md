@@ -1,4 +1,9 @@
 ## Command to run the frontend
 
-cd frontend
+cd frontend 
 npm run dev
+
+
+## Install Packages
+
+
