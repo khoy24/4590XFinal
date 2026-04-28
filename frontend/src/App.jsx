@@ -97,7 +97,7 @@ function App() {
               ? "bg-green-100 text-green-800"
               : awsStatus === "pending"
                 ? "bg-yellow-100 text-yellow-800 cursor-wait"
-                : "bg-[#C7C6EF] text-black hover:bg-[#b8b7e8]"
+                : "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
           }`}
         >
           {awsStatus === "connected"
@@ -177,7 +177,7 @@ function App() {
                   disabled={
                     !inputText.trim() || awsStatus !== "connected" || isLoading
                   }
-                  className="p-2 bg-[#C7C6EF] rounded-xl text-black hover:bg-[#b8b7e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  className="p-2 bg-[#C1C4FF] rounded-xl text-black hover:bg-[#b8b7e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
