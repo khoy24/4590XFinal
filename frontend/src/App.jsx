@@ -1,20 +1,55 @@
 import { useState, useRef, useEffect } from "react";
+import AWSConnectModal from "./AWSConnectModal.jsx";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+function formatActionResults(actionResults) {
+  if (!actionResults || actionResults.length === 0) return null;
+  return actionResults.map((ar, i) => {
+    const label = `${ar.service}.${ar.operation}`;
+    if (ar.ok) {
+      const preview =
+        ar.result != null
+          ? JSON.stringify(ar.result, null, 2)
+          : "(no payload)";
+      return (
+        <li key={i} className="mt-1 text-xs text-left">
+          <span className="font-semibold text-green-800">{label}</span>
+          <pre className="mt-1 whitespace-pre-wrap break-words bg-white/60 rounded-lg p-2 max-h-36 overflow-y-auto text-gray-800">
+            {preview}
+          </pre>
+        </li>
+      );
+    }
+    return (
+      <li key={i} className="mt-1 text-xs text-left">
+        <span className="font-semibold text-red-800">{label}</span>
+        <span className="block text-red-700 mt-0.5">{ar.error || "Failed"}</span>
+      </li>
+    );
+  });
+}
 
 function App() {
-  // functions TBD
-
-  // State Management
   const [awsStatus, setAwsStatus] = useState("disconnected");
+  const [sessionId, setSessionId] = useState(null);
+  const [accountId, setAccountId] = useState(null);
+  const [userArn, setUserArn] = useState(null);
+  const [awsRegion, setAwsRegion] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [connectSubmitting, setConnectSubmitting] = useState(false);
+  const [connectError, setConnectError] = useState(null);
+
   const [messages, setMessages] = useState([
     {
       role: "bot",
       text: "Hello! I am your Cloud Security Architect. Please connect your AWS account to get started.",
+      actionResults: null,
     },
   ]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Auto-scroll logic for the chat window
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -23,50 +58,123 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  // Handle AWS Connection
   const handleConnectAWS = () => {
-    if (awsStatus === "connected" || awsStatus === "pending") return;
+    if (awsStatus === "connected" || connectSubmitting) return;
+    setConnectError(null);
+    setModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    if (connectSubmitting) return;
+    setModalOpen(false);
+    setConnectError(null);
+  };
+
+  const handleModalSubmit = async (payload) => {
+    setConnectError(null);
+    setConnectSubmitting(true);
     setAwsStatus("pending");
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_BASE}/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        let msg = "Could not validate AWS credentials.";
+        const d = data.detail;
+        if (typeof d === "string") msg = d;
+        else if (Array.isArray(d))
+          msg = d.map((x) => x.msg || JSON.stringify(x)).join("; ");
+        else if (d != null) msg = JSON.stringify(d);
+        setConnectError(msg);
+        setAwsStatus("disconnected");
+        return;
+      }
+      setSessionId(data.session_id);
+      setAccountId(data.account_id);
+      setUserArn(data.user_arn);
+      setAwsRegion(data.region);
       setAwsStatus("connected");
+      setModalOpen(false);
       setMessages((prev) => [
         ...prev,
         {
           role: "system",
-          text: "AWS Account Successfully Linked! You can now ask me to deploy infrastructure.",
+          text: `AWS connected (account ${data.account_id}). You can ask me to list buckets, describe VPCs, and more.`,
+          actionResults: null,
         },
       ]);
-    }, 2000);
+    } catch (err) {
+      console.error(err);
+      setConnectError("Could not reach the backend. Is it running on :8000?");
+      setAwsStatus("disconnected");
+    } finally {
+      setConnectSubmitting(false);
+    }
   };
 
-  // Handle Chat Submission
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputText.trim() || awsStatus !== "connected") return;
+    if (!inputText.trim() || awsStatus !== "connected" || !sessionId) return;
 
-    const userMessage = { role: "user", text: inputText };
+    const userMessage = { role: "user", text: inputText, actionResults: null };
     setMessages((prev) => [...prev, userMessage]);
     setInputText("");
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/chat", {
+      const response = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userMessage.text }),
+        body: JSON.stringify({
+          prompt: userMessage.text,
+          session_id: sessionId,
+        }),
       });
 
-      if (!response.ok) throw new Error("Backend connection failed");
+      const data = await response.json().catch(() => ({}));
 
-      const data = await response.json();
-      setMessages((prev) => [...prev, { role: "bot", text: data.reply }]);
+      if (!response.ok) {
+        const detailStr = (() => {
+          const d = data.detail;
+          if (typeof d === "string") return d;
+          if (Array.isArray(d))
+            return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
+          return null;
+        })();
+
+        if (response.status === 401) {
+          setAwsStatus("disconnected");
+          setSessionId(null);
+          throw new Error(
+            detailStr || "Session expired. Please connect AWS again."
+          );
+        }
+        throw new Error(
+          detailStr || `Backend request failed (${response.status}).`
+        );
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "bot",
+          text: data.reply,
+          actionResults: data.action_results || [],
+        },
+      ]);
     } catch (error) {
       console.error(error);
       setMessages((prev) => [
         ...prev,
         {
           role: "bot",
-          text: "System Error: Could not reach the backend.",
+          text:
+            error.message ||
+            "System Error: Could not reach the backend or chat failed.",
+          actionResults: null,
         },
       ]);
     } finally {
@@ -75,11 +183,16 @@ function App() {
   };
 
   return (
-    // main layout
     <div className="flex h-screen w-screen bg-white font-mono overflow-hidden">
-      {/* leftside panel */}
+      <AWSConnectModal
+        open={modalOpen}
+        onClose={handleModalClose}
+        onSubmit={handleModalSubmit}
+        isSubmitting={connectSubmitting}
+        errorMessage={connectError}
+      />
+
       <aside className="w-[55%] h-full flex flex-col justify-start items-center text-center pt-[5vh] px-[5vw]">
-        {/* Title and Subtitle Grouped */}
         <div className="mb-4">
           <h1 className="text-4xl md:text-5xl font-normal text-black tracking-tight">
             Cloud Deployment Assistant
@@ -89,7 +202,6 @@ function App() {
           </p>
         </div>
 
-        {/* Button to connect to AWS */}
         <button
           onClick={handleConnectAWS}
           className={`px-10 py-2 font-medium text-xl rounded-full transition-all duration-200 shadow-sm ${
@@ -107,26 +219,39 @@ function App() {
               : "Connect to AWS"}
         </button>
 
-        {/* explain the button */}
+        {awsStatus === "connected" && accountId ? (
+          <div className="mt-4 max-w-md text-xs text-gray-600 text-left space-y-1">
+            <p>
+              <strong>Account:</strong> {accountId}
+            </p>
+            {awsRegion ? (
+              <p>
+                <strong>Region:</strong> {awsRegion}
+              </p>
+            ) : null}
+            {userArn ? (
+              <p className="break-all">
+                <strong>ARN:</strong> {userArn}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="max-w-[300px] pt-[3vh] text-xs text-gray-400 leading-relaxed mt-2 space-y-4">
           <p>
-            <strong>How it works:</strong> Clicking this creates a secure
-            "handshake" (IAM Role) in your AWS account. We never store your
-            passwords or keys. You remain in full control and can revoke access
-            instantly from your AWS console at any time. <break />
+            <strong>How it works:</strong> You enter temporary or IAM user
+            credentials; we validate them with AWS STS and keep them in server
+            memory only for this session. You can revoke the keys anytime from
+            IAM.
           </p>
           <p>
-            Make sure you are logged into your AWS Management Console before
-            clicking this button.
+            For class demonstration, we will use a dedicated IAM user with minimal permissions.
           </p>
         </div>
       </aside>
 
-      {/* chat panel */}
       <section className="w-[45%] h-full py-[5vh] pr-[4vw] pl-[1vw]">
-        {/* gray chat frame */}
         <div className="w-full h-full bg-[#F0F0F0] flex flex-col relative rounded-sm">
-          {/* chat messages area */}
           <main className="flex-1 overflow-y-auto p-6 scrollbar-thin">
             <div className="flex flex-col space-y-4">
               {messages.map((msg, index) => (
@@ -143,7 +268,12 @@ function App() {
                           : "bg-[#C1C4FF] text-black rounded-bl-none shadow-sm"
                     }`}
                   >
-                    {msg.text}
+                    <div>{msg.text}</div>
+                    {msg.role === "bot" && msg.actionResults?.length ? (
+                      <ul className="list-none mt-3 pt-3 border-t border-black/10">
+                        {formatActionResults(msg.actionResults)}
+                      </ul>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -158,7 +288,6 @@ function App() {
             </div>
           </main>
 
-          {/* expandable input area */}
           <footer className="p-4 w-full">
             <form
               onSubmit={handleSendMessage}
@@ -168,7 +297,6 @@ function App() {
                 value={inputText}
                 onChange={(e) => {
                   setInputText(e.target.value);
-                  // Auto-resize logic:
                   e.target.style.height = "auto";
                   e.target.style.height = e.target.scrollHeight + "px";
                 }}
@@ -178,13 +306,12 @@ function App() {
                     handleSendMessage(e);
                   }
                 }}
-                placeholder="user will type in their question/request here"
+                placeholder="Ask to list S3 buckets, describe VPCs, etc."
                 disabled={awsStatus !== "connected"}
                 className="flex-1 px-5 py-4 bg-transparent text-black text-sm focus:outline-none resize-none overflow-y-auto min-h-[52px] max-h-[150px] disabled:opacity-50"
-                rows="1"
+                rows={1}
               />
 
-              {/* Send Button matching my Figma Icon */}
               <div className="p-2 flex-shrink-0">
                 <button
                   type="submit"
