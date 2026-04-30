@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import AWSConnectModal from "./AWSConnectModal.jsx";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 function formatActionResults(actionResults) {
   if (!actionResults || actionResults.length === 0) return null;
@@ -76,7 +76,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/verify-role`,
+        `${import.meta.env.VITE_API_URL}/verify-role`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
