@@ -1,31 +1,12 @@
-import { useState } from "react";
-
-const DEFAULT_REGIONS = [
-  "us-east-1",
-  "us-east-2",
-  "us-west-1",
-  "us-west-2",
-  "ca-central-1",
-  "eu-west-1",
-  "eu-west-2",
-  "eu-central-1",
-  "ap-northeast-1",
-  "ap-southeast-1",
-  "ap-southeast-2",
-];
+import { useState, useEffect, useRef } from "react";
 
 /**
  * @param {{
- *   open: boolean;
- *   onClose: () => void;
- *   onSubmit: (payload: {
- *     access_key: string;
- *     secret_key: string;
- *     session_token: string | null;
- *     region: string;
- *   }) => Promise<void>;
- *   isSubmitting: boolean;
- *   errorMessage: string | null;
+ * open: boolean;
+ * onClose: () => void;
+ * onSubmit: (payload: { role_arn: string; session_id: string }) => Promise<void>;
+ * isSubmitting: boolean;
+ * errorMessage: string | null;
  * }} props
  */
 export default function AWSConnectModal({
@@ -35,20 +16,36 @@ export default function AWSConnectModal({
   isSubmitting,
   errorMessage,
 }) {
-  const [accessKey, setAccessKey] = useState("");
-  const [secretKey, setSecretKey] = useState("");
-  const [sessionToken, setSessionToken] = useState("");
-  const [region, setRegion] = useState("us-east-1");
+  const [roleArn, setRoleArn] = useState("");
+  const [awsLink, setAwsLink] = useState("");
+
+  // unique session ID for this browser tab
+  const sessionId = useRef(crypto.randomUUID());
+
+  useEffect(() => {
+    if (!open) return;
+
+    const fetchLink = async () => {
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/generate-aws-link?user_id=${sessionId.current}`,
+        );
+        const data = await response.json();
+        setAwsLink(data.link);
+      } catch (error) {
+        console.error("Failed to load AWS link", error);
+      }
+    };
+    fetchLink();
+  }, [open]);
 
   if (!open) return null;
 
   async function handleSubmit(e) {
     e.preventDefault();
     await onSubmit({
-      access_key: accessKey.trim(),
-      secret_key: secretKey,
-      session_token: sessionToken.trim() || null,
-      region: region.trim(),
+      role_arn: roleArn.trim(),
+      session_id: sessionId.current,
     });
   }
 
@@ -64,66 +61,46 @@ export default function AWSConnectModal({
           id="aws-modal-title"
           className="text-lg font-semibold text-black mb-1"
         >
-          Connect AWS account
+          Connect AWS Account securely
         </h2>
-        <p className="text-xs text-gray-500 mb-4 leading-relaxed">
-          Credentials are sent once to this app&apos;s backend, validated with
-          AWS STS, and kept in memory only for your session. Use a{" "}
-          <strong>least-privilege IAM user</strong> or temporary keys. Never use
-          your root account keys.
+        <p className="text-xs text-gray-500 mb-6 leading-relaxed">
+          When AWS opens, scroll to the bottom, check the 'I acknowledge' box,
+          and click Create stack.
         </p>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3 text-sm">
+        {/* link*/}
+        <div className="mb-6 flex flex-col gap-2">
+          <span className="text-sm font-medium text-gray-700">
+            1. Create the connection
+          </span>
+          <a
+            href={awsLink}
+            target="_blank"
+            rel="noreferrer"
+            className={`flex justify-center items-center w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium transition-colors ${
+              awsLink
+                ? "bg-gray-50 text-black hover:bg-gray-100"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            {awsLink ? "Open AWS Quick-Create ↗" : "Generating secure link..."}
+          </a>
+        </div>
+
+        {/* input form */}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-sm">
           <label className="flex flex-col gap-1 text-left">
-            <span className="text-gray-600">Access Key ID</span>
+            <span className="font-medium text-gray-700">2. Paste Role ARN</span>
             <input
               type="text"
               autoComplete="off"
-              value={accessKey}
-              onChange={(e) => setAccessKey(e.target.value)}
+              value={roleArn}
+              onChange={(e) => setRoleArn(e.target.value)}
               className="rounded-lg border border-gray-200 px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-[#C1C4FF]"
+              placeholder="arn:aws:iam::123456789012:role/CloudAssistant..."
               required
               disabled={isSubmitting}
             />
-          </label>
-          <label className="flex flex-col gap-1 text-left">
-            <span className="text-gray-600">Secret Access Key</span>
-            <input
-              type="password"
-              autoComplete="off"
-              value={secretKey}
-              onChange={(e) => setSecretKey(e.target.value)}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-[#C1C4FF]"
-              required
-              disabled={isSubmitting}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-left">
-            <span className="text-gray-600">Session token (optional)</span>
-            <input
-              type="password"
-              autoComplete="off"
-              value={sessionToken}
-              onChange={(e) => setSessionToken(e.target.value)}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-[#C1C4FF]"
-              placeholder="Only if using temporary credentials"
-              disabled={isSubmitting}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-left">
-            <span className="text-gray-600">Region</span>
-            <select
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-[#C1C4FF]"
-              disabled={isSubmitting}
-            >
-              {DEFAULT_REGIONS.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
           </label>
 
           {errorMessage ? (
@@ -132,19 +109,19 @@ export default function AWSConnectModal({
             </p>
           ) : null}
 
-          <div className="flex gap-2 justify-end mt-2">
+          <div className="flex gap-2 justify-end mt-4">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+              className="px-4 py-2 rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-full bg-[#C1C4FF] text-black hover:bg-[#b8b7e8] disabled:opacity-50"
+              disabled={isSubmitting || !roleArn}
+              className="px-4 py-2 rounded-full bg-[#C1C4FF] text-black hover:bg-[#b8b7e8] disabled:opacity-50 transition-colors font-medium"
             >
               {isSubmitting ? "Validating…" : "Connect"}
             </button>

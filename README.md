@@ -15,15 +15,21 @@ decisions. The final system will demonstrate how combining Large Language Models
 with AWS domain language can automate the creation of a reliable, secure cloud environment
 for non-technical users.
 
-
 # Project Setup
 
 You will need to create a Gemini API Key in Google AI Studio, and replace it with the placeholder in the .env file.
 
-### .env file creation
+### Creating both of the initial .env files
+
+You will have to fill the contents in later
 
 ```bash
-GEMINI_API_KEY="your_api_key_here"
+cd backend
+cp .env.example .env
+
+cd ..
+cd frontend
+cp .env.example .env
 ```
 
 ## Run the Frontend

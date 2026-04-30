@@ -1,0 +1,35 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Role for CloudAssistant to manage infrastructure"
+
+Parameters:
+  ExternalID:
+    Type: String
+    Description: "The unique ID provided by the CloudAssistant application"
+  BackendAccountID:
+    Type: String
+    Description: "The AWS Account ID of the CloudAssistant backend"
+
+Resources:
+  CloudAssistantRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "CloudAssistantRole-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              # need from secrets
+              AWS: !Sub "arn:aws:iam::${BackendAccountID}:root"
+            Action: "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                "sts:ExternalId": !Ref ExternalID
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+
+Outputs:
+  RoleARN:
+    Value: !GetAtt CloudAssistantRole.Arn
+    Description: "Copy this ARN back into the Assistant app"

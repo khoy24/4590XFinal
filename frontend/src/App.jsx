@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import AWSConnectModal from "./AWSConnectModal.jsx";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 function formatActionResults(actionResults) {
   if (!actionResults || actionResults.length === 0) return null;
@@ -9,9 +9,7 @@ function formatActionResults(actionResults) {
     const label = `${ar.service}.${ar.operation}`;
     if (ar.ok) {
       const preview =
-        ar.result != null
-          ? JSON.stringify(ar.result, null, 2)
-          : "(no payload)";
+        ar.result != null ? JSON.stringify(ar.result, null, 2) : "(no payload)";
       return (
         <li key={i} className="mt-1 text-xs text-left">
           <span className="font-semibold text-green-800">{label}</span>
@@ -24,7 +22,9 @@ function formatActionResults(actionResults) {
     return (
       <li key={i} className="mt-1 text-xs text-left">
         <span className="font-semibold text-red-800">{label}</span>
-        <span className="block text-red-700 mt-0.5">{ar.error || "Failed"}</span>
+        <span className="block text-red-700 mt-0.5">
+          {ar.error || "Failed"}
+        </span>
       </li>
     );
   });
@@ -71,45 +71,41 @@ function App() {
   };
 
   const handleModalSubmit = async (payload) => {
-    setConnectError(null);
     setConnectSubmitting(true);
-    setAwsStatus("pending");
+    console.log("Submitting ARN...", payload);
+
     try {
-      const res = await fetch(`${API_BASE}/connect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        let msg = "Could not validate AWS credentials.";
-        const d = data.detail;
-        if (typeof d === "string") msg = d;
-        else if (Array.isArray(d))
-          msg = d.map((x) => x.msg || JSON.stringify(x)).join("; ");
-        else if (d != null) msg = JSON.stringify(d);
-        setConnectError(msg);
-        setAwsStatus("disconnected");
-        return;
-      }
-      setSessionId(data.session_id);
-      setAccountId(data.account_id);
-      setUserArn(data.user_arn);
-      setAwsRegion(data.region);
-      setAwsStatus("connected");
-      setModalOpen(false);
-      setMessages((prev) => [
-        ...prev,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/verify-role`,
         {
-          role: "system",
-          text: `AWS connected (account ${data.account_id}). You can ask me to list buckets, describe VPCs, and more.`,
-          actionResults: null,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         },
-      ]);
-    } catch (err) {
-      console.error(err);
-      setConnectError("Could not reach the backend. Is it running on :8000?");
-      setAwsStatus("disconnected");
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setConnectError(data.detail || "Connection failed.");
+      } else {
+        setConnectError(null);
+        setAwsStatus("connected");
+        setSessionId(payload.session_id);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "bot",
+            text: "Successfully securely connected to AWS! What would you like to build today?",
+            actionResults: null,
+          },
+        ]);
+
+        handleModalClose();
+      }
+    } catch (error) {
+      setConnectError("Failed to reach the server. Is the backend running?");
     } finally {
       setConnectSubmitting(false);
     }
@@ -149,11 +145,11 @@ function App() {
           setAwsStatus("disconnected");
           setSessionId(null);
           throw new Error(
-            detailStr || "Session expired. Please connect AWS again."
+            detailStr || "Session expired. Please connect AWS again.",
           );
         }
         throw new Error(
-          detailStr || `Backend request failed (${response.status}).`
+          detailStr || `Backend request failed (${response.status}).`,
         );
       }
 
@@ -245,7 +241,8 @@ function App() {
             IAM.
           </p>
           <p>
-            For class demonstration, we will use a dedicated IAM user with minimal permissions.
+            For class demonstration, we will use a dedicated IAM user with
+            minimal permissions.
           </p>
         </div>
       </aside>

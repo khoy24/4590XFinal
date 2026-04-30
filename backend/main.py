@@ -1,7 +1,7 @@
-# /backend/main.py
 import json
 import re
 import uuid
+import urllib.parse
 from typing import Any
 
 import boto3
@@ -22,14 +22,16 @@ if not gemini_api_key:
     raise ValueError("GEMINI_API_KEY is missing from the .env file")
 
 genai.configure(api_key=gemini_api_key)
-
-# right now use gemini-2.5-flash as it is fast and cheap
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-# initialize FastAPI App
+# get account id from backend .env
+BACKEND_ACCOUNT_ID = os.getenv("AWS_BACKEND_ACCOUNT_ID")
+if not BACKEND_ACCOUNT_ID:
+    print("WARNING: AWS_BACKEND_ACCOUNT_ID is missing from .env. The link will not work.")
+
 app = FastAPI(title="Cloud Deployment Assistant API")
 
-# setup CORS (Cross-Origin Resource Sharing)
+#  CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -38,29 +40,113 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session store: session_id -> creds + AWS identity (never persisted to disk)
+# in-memory session store
 sessions: dict[str, dict[str, Any]] = {}
 
-# Only these (service, operation) pairs may be executed (boto3 client method names)
+# only these can be used
 ALLOWED_AWS_ACTIONS: dict[str, frozenset[str]] = {
     "s3": frozenset({"list_buckets", "create_bucket"}),
-    "ec2": frozenset(
-        {"describe_instances", "describe_security_groups", "describe_vpcs"}
-    ),
+    "ec2": frozenset({"describe_instances", "describe_security_groups", "describe_vpcs"}),
     "iam": frozenset({"list_users", "get_user"}),
     "sts": frozenset({"get_caller_identity"}),
 }
 
+# classes for the gemini chat
+class ChatRequest(BaseModel):
+    prompt: str
+    session_id: str
+
+class ActionResultItem(BaseModel):
+    service: str
+    operation: str
+    ok: bool
+    result: Any | None = None
+    error: str | None = None
+
+class ChatResponse(BaseModel):
+    reply: str
+    action_results: list[ActionResultItem] = []
 
 def _boto_session_from_stored(entry: dict[str, Any]) -> boto3.Session:
+    """Builds a session using the TEMPORARY credentials from AssumeRole."""
     creds = entry["creds"]
     return boto3.Session(
         aws_access_key_id=creds["access_key"],
         aws_secret_access_key=creds["secret_key"],
-        aws_session_token=creds.get("session_token") or None,
-        region_name=creds["region"],
+        aws_session_token=creds["session_token"], # required for roles
+        region_name=entry.get("region", "us-east-1"),
     )
 
+
+def _parse_gemini_json(text: str) -> dict[str, Any]:
+    """Extract JSON object from model output (handles optional markdown fences)."""
+    s = text.strip()
+
+class VerifyRoleRequest(BaseModel):
+    session_id: str
+    role_arn: str
+    region: str = "us-east-1"
+
+@app.get("/generate-aws-link")
+async def generate_aws_link(user_id: str):
+    """Generates the link and stores the required External ID."""
+    if not BACKEND_ACCOUNT_ID:
+        raise HTTPException(status_code=500, detail="Backend not configured correctly.")
+
+    unique_external_id = str(uuid.uuid4())
+    
+    sessions[user_id] = {
+        "status": "pending",
+        "external_id": unique_external_id
+    }
+    
+    # gist URL / yaml template
+    template_url = "https://cloud-assistant-template-1.s3.us-east-1.amazonaws.com/template.yaml"
+    encoded_url = urllib.parse.quote(template_url)
+    template_link = f"https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL={encoded_url}&stackName=CloudAssistant&param_ExternalID={unique_external_id}&param_BackendAccountID={BACKEND_ACCOUNT_ID}"
+    
+    return {"link": template_link}
+
+
+@app.post("/verify-role")
+async def verify_aws_role(request: VerifyRoleRequest):
+    """Performs the handshake and stores temporary credentials."""
+    session_data = sessions.get(request.session_id)
+    
+    if not session_data or session_data.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Invalid session. Please reopen the connection modal.")
+
+    sts_client = boto3.client('sts')
+    
+    try:
+        response = sts_client.assume_role(
+            RoleArn=request.role_arn,
+            RoleSessionName="CloudAssistantSession",
+            ExternalId=session_data["external_id"]
+        )
+        
+        credentials = response['Credentials']
+        assumed_role_user = response['AssumedRoleUser']
+        
+        # Update our session store with the active temporary credentials
+        sessions[request.session_id] = {
+            "status": "active",
+            "creds": {
+                "access_key": credentials['AccessKeyId'],
+                "secret_key": credentials['SecretAccessKey'],
+                "session_token": credentials['SessionToken'],
+            },
+            "account_id": assumed_role_user['Arn'].split(':')[4],
+            "user_arn": assumed_role_user['Arn'],
+            "region": request.region
+        }
+        
+        return {"status": "success", "message": "Successfully assumed role!"}
+        
+    except ClientError as e:
+        raise HTTPException(status_code=403, detail=f"Access Denied: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def _parse_gemini_json(text: str) -> dict[str, Any]:
     """Extract JSON object from model output (handles optional markdown fences)."""
@@ -177,90 +263,15 @@ def _summarize_response(service: str, operation: str, out: dict[str, Any]) -> An
         }
     return out
 
-
-class ConnectRequest(BaseModel):
-    access_key: str = Field(..., min_length=16)
-    secret_key: str = Field(..., min_length=1)
-    session_token: str | None = None
-    region: str = Field(..., min_length=1)
-
-
-class ConnectResponse(BaseModel):
-    session_id: str
-    account_id: str
-    user_arn: str
-    region: str
-
-
-class ChatRequest(BaseModel):
-    prompt: str
-    session_id: str
-
-
-class ActionResultItem(BaseModel):
-    service: str
-    operation: str
-    ok: bool
-    result: Any | None = None
-    error: str | None = None
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    action_results: list[ActionResultItem] = []
-
-
-@app.post("/connect", response_model=ConnectResponse)
-async def connect_aws(request: ConnectRequest):
-    """Validate credentials via STS; store in memory only."""
-    session_kw: dict[str, Any] = {
-        "aws_access_key_id": request.access_key,
-        "aws_secret_access_key": request.secret_key,
-        "region_name": request.region,
-    }
-    if request.session_token:
-        session_kw["aws_session_token"] = request.session_token
-    try:
-        sts = boto3.client("sts", **session_kw)
-        ident = sts.get_caller_identity()
-    except ClientError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=e.response.get("Error", {}).get("Message", "Invalid credentials"),
-        ) from e
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
-
-    account_id = ident.get("Account") or ""
-    user_arn = ident.get("Arn") or ""
-    session_id = str(uuid.uuid4())
-    sessions[session_id] = {
-        "creds": {
-            "access_key": request.access_key,
-            "secret_key": request.secret_key,
-            "session_token": request.session_token,
-            "region": request.region,
-        },
-        "account_id": account_id,
-        "user_arn": user_arn,
-    }
-    return ConnectResponse(
-        session_id=session_id,
-        account_id=account_id,
-        user_arn=user_arn,
-        region=request.region,
-    )
-
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_gemini(request: ChatRequest):
     entry = sessions.get(request.session_id)
-    if not entry:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    if not entry or entry.get("status") != "active":
+        raise HTTPException(status_code=401, detail="Invalid or expired session. Please connect your AWS account.")
 
     account_id = entry.get("account_id", "")
     user_arn = entry.get("user_arn", "")
-    region = entry["creds"]["region"]
+    region = entry.get("region", "us-east-1")
 
     allowed_block = "\n".join(
         f"- {svc}: {', '.join(sorted(ops))}"
@@ -300,10 +311,7 @@ Rules:
         raw_text = (response.text or "").strip()
     except Exception as e:
         print(f"Error calling Gemini: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal Server Error while generating response.",
-        ) from e
+        raise HTTPException(status_code=500, detail="Internal Server Error while generating response.") from e
 
     explanation = raw_text
     actions: list[dict[str, Any]] = []
@@ -321,8 +329,3 @@ Rules:
         reply=explanation,
         action_results=[ActionResultItem(**r) for r in action_results],
     )
-
-
-@app.get("/")
-async def health_check():
-    return {"status": "Backend is running!"}
