@@ -27,7 +27,7 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 # get account id from backend .env
 BACKEND_ACCOUNT_ID = os.getenv("AWS_BACKEND_ACCOUNT_ID")
 if not BACKEND_ACCOUNT_ID:
-    print("WARNING: AWS_BACKEND_ACCOUNT_ID is missing from .env. The magic link will not work.")
+    print("WARNING: AWS_BACKEND_ACCOUNT_ID is missing from .env. The link will not work.")
 
 app = FastAPI(title="Cloud Deployment Assistant API")
 
@@ -89,7 +89,7 @@ class VerifyRoleRequest(BaseModel):
 
 @app.get("/generate-aws-link")
 async def generate_aws_link(user_id: str):
-    """Generates the magic link and stores the required External ID."""
+    """Generates the link and stores the required External ID."""
     if not BACKEND_ACCOUNT_ID:
         raise HTTPException(status_code=500, detail="Backend not configured correctly.")
 
