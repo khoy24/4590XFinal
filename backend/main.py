@@ -103,9 +103,9 @@ async def generate_aws_link(user_id: str):
     # gist URL / yaml template
     template_url = "https://cloud-assistant-template-1.s3.us-east-1.amazonaws.com/template.yaml"
     encoded_url = urllib.parse.quote(template_url)
-    magic_link = f"https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL={encoded_url}&stackName=CloudAssistant&param_ExternalID={unique_external_id}&param_BackendAccountID={BACKEND_ACCOUNT_ID}"
+    template_link = f"https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL={encoded_url}&stackName=CloudAssistant&param_ExternalID={unique_external_id}&param_BackendAccountID={BACKEND_ACCOUNT_ID}"
     
-    return {"link": magic_link}
+    return {"link": template_link}
 
 
 @app.post("/verify-role")
