@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # load environment variables from .env file
 load_dotenv()
@@ -67,6 +67,13 @@ class ChatResponse(BaseModel):
     reply: str
     action_results: list[ActionResultItem] = []
 
+
+class VerifyRoleRequest(BaseModel):
+    session_id: str
+    role_arn: str
+    region: str = "us-east-1"
+
+
 def _boto_session_from_stored(entry: dict[str, Any]) -> boto3.Session:
     """Builds a session using the TEMPORARY credentials from AssumeRole."""
     creds = entry["creds"]
@@ -81,11 +88,11 @@ def _boto_session_from_stored(entry: dict[str, Any]) -> boto3.Session:
 def _parse_gemini_json(text: str) -> dict[str, Any]:
     """Extract JSON object from model output (handles optional markdown fences)."""
     s = text.strip()
+    fence = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", s)
+    if fence:
+        s = fence.group(1).strip()
+    return json.loads(s)
 
-class VerifyRoleRequest(BaseModel):
-    session_id: str
-    role_arn: str
-    region: str = "us-east-1"
 
 @app.get("/generate-aws-link")
 async def generate_aws_link(user_id: str):
@@ -141,20 +148,18 @@ async def verify_aws_role(request: VerifyRoleRequest):
             "region": request.region
         }
         
-        return {"status": "success", "message": "Successfully assumed role!"}
-        
+        return {
+            "status": "success",
+            "message": "Successfully assumed role!",
+            "account_id": sessions[request.session_id]["account_id"],
+            "user_arn": sessions[request.session_id]["user_arn"],
+            "region": sessions[request.session_id]["region"],
+        }
+
     except ClientError as e:
         raise HTTPException(status_code=403, detail=f"Access Denied: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-def _parse_gemini_json(text: str) -> dict[str, Any]:
-    """Extract JSON object from model output (handles optional markdown fences)."""
-    s = text.strip()
-    fence = re.match(r"^```(?:json)?\s*([\s\S]*?)\s*```$", s)
-    if fence:
-        s = fence.group(1).strip()
-    return json.loads(s)
 
 
 def _execute_aws_actions(

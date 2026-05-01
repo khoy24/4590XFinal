@@ -72,7 +72,6 @@ function App() {
 
   const handleModalSubmit = async (payload) => {
     setConnectSubmitting(true);
-    console.log("Submitting ARN...", payload);
 
     try {
       const response = await fetch(
@@ -92,6 +91,9 @@ function App() {
         setConnectError(null);
         setAwsStatus("connected");
         setSessionId(payload.session_id);
+        setAccountId(data.account_id ?? null);
+        setUserArn(data.user_arn ?? null);
+        setAwsRegion(data.region ?? null);
 
         setMessages((prev) => [
           ...prev,
@@ -104,7 +106,7 @@ function App() {
 
         handleModalClose();
       }
-    } catch (error) {
+    } catch {
       setConnectError("Failed to reach the server. Is the backend running?");
     } finally {
       setConnectSubmitting(false);
@@ -144,6 +146,9 @@ function App() {
         if (response.status === 401) {
           setAwsStatus("disconnected");
           setSessionId(null);
+          setAccountId(null);
+          setUserArn(null);
+          setAwsRegion(null);
           throw new Error(
             detailStr || "Session expired. Please connect AWS again.",
           );
@@ -203,16 +208,10 @@ function App() {
           className={`px-10 py-2 font-medium text-xl rounded-full transition-all duration-200 shadow-sm ${
             awsStatus === "connected"
               ? "bg-green-100 text-green-800"
-              : awsStatus === "pending"
-                ? "bg-yellow-100 text-yellow-800 cursor-wait"
-                : "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
+              : "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
           }`}
         >
-          {awsStatus === "connected"
-            ? "AWS Connected"
-            : awsStatus === "pending"
-              ? "Connecting..."
-              : "Connect to AWS"}
+          {awsStatus === "connected" ? "AWS Connected" : "Connect to AWS"}
         </button>
 
         {awsStatus === "connected" && accountId ? (
@@ -235,14 +234,17 @@ function App() {
 
         <div className="max-w-[300px] pt-[3vh] text-xs text-gray-400 leading-relaxed mt-2 space-y-4">
           <p>
-            <strong>How it works:</strong> You enter temporary or IAM user
-            credentials; we validate them with AWS STS and keep them in server
-            memory only for this session. You can revoke the keys anytime from
-            IAM.
+            <strong>How it works:</strong> You create an IAM role in your account
+            via the AWS CloudFormation quick-create link. The stack uses an{" "}
+            <strong>ExternalId</strong> so only this app can assume that role.
+            We call <strong>STS AssumeRole</strong>, store the resulting{" "}
+            <strong>temporary</strong> credentials in server memory for your
+            session, then run only allowlisted API calls. Delete the stack or
+            role in AWS to revoke access.
           </p>
           <p>
-            For class demonstration, we will use a dedicated IAM user with
-            minimal permissions.
+            You never paste long-term access keys into this app — only the Role
+            ARN outputs from CloudFormation.
           </p>
         </div>
       </aside>
