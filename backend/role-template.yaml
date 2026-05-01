@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Least-privilege role for CloudAssistant to manage infrastructure (STS assume-role + allowlisted APIs)"
+Description: "Least-privilege role for CloudAssistant (STS assume-role + allowlisted APIs + Webhook)"
 
 Parameters:
   ExternalID:
@@ -8,6 +8,9 @@ Parameters:
   BackendAccountID:
     Type: String
     Description: "The AWS Account ID of the CloudAssistant backend"
+  WebhookURL:
+    Type: String
+    Description: "The API endpoint of CloudAssistant to receive the Role ARN"
 
 Resources:
   CloudAssistantRole:
@@ -31,47 +34,97 @@ Resources:
             Statement:
               - Sid: STSIdentity
                 Effect: Allow
-                Action:
-                  - sts:GetCallerIdentity
+                Action: ["sts:GetCallerIdentity"]
                 Resource: "*"
               - Sid: S3ReadWriteDemo
                 Effect: Allow
                 Action:
-                  - s3:ListAllMyBuckets
-                  - s3:CreateBucket
-                  - s3:GetBucketLocation
+                  [
+                    "s3:ListAllMyBuckets",
+                    "s3:CreateBucket",
+                    "s3:GetBucketLocation",
+                  ]
                 Resource: "*"
               - Sid: EC2Read
                 Effect: Allow
                 Action:
-                  - ec2:DescribeInstances
-                  - ec2:DescribeSecurityGroups
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeRouteTables
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeInternetGateways
+                  [
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeVpcs",
+                    "ec2:DescribeRouteTables",
+                    "ec2:DescribeSubnets",
+                    "ec2:DescribeInternetGateways",
+                  ]
                 Resource: "*"
               - Sid: EC2VPCStarterWrites
                 Effect: Allow
                 Action:
-                  - ec2:CreateVpc
-                  - ec2:ModifyVpcAttribute
-                  - ec2:CreateSubnet
-                  - ec2:CreateInternetGateway
-                  - ec2:AttachInternetGateway
-                  - ec2:CreateRouteTable
-                  - ec2:CreateRoute
-                  - ec2:AssociateRouteTable
-                  - ec2:CreateTags
+                  [
+                    "ec2:CreateVpc",
+                    "ec2:ModifyVpcAttribute",
+                    "ec2:CreateSubnet",
+                    "ec2:CreateInternetGateway",
+                    "ec2:AttachInternetGateway",
+                    "ec2:CreateRouteTable",
+                    "ec2:CreateRoute",
+                    "ec2:AssociateRouteTable",
+                    "ec2:CreateTags",
+                  ]
                 Resource: "*"
               - Sid: IAMReadDemo
                 Effect: Allow
-                Action:
-                  - iam:ListUsers
-                  - iam:GetUser
+                Action: ["iam:ListUsers", "iam:GetUser"]
                 Resource: "*"
+
+  WebhookExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  WebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt WebhookExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import json
+          import urllib.request
+          import cfnresponse
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  props = event['ResourceProperties']
+                  payload = json.dumps({'role_arn': props['RoleArn'], 'external_id': props['ExternalId']}).encode('utf-8')
+                  req = urllib.request.Request(props['WebhookUrl'], data=payload, headers={'Content-Type': 'application/json'})
+                  urllib.request.urlopen(req, timeout=5)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f"Webhook failed: {e}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+  TriggerWebhook:
+    Type: Custom::WebhookTrigger
+    DependsOn: CloudAssistantRole
+    Properties:
+      ServiceToken: !GetAtt WebhookFunction.Arn
+      RoleArn: !GetAtt CloudAssistantRole.Arn
+      ExternalId: !Ref ExternalID
+      WebhookUrl: !Ref WebhookURL
 
 Outputs:
   RoleARN:
     Value: !GetAtt CloudAssistantRole.Arn
-    Description: "Copy this ARN back into the Assistant app"
+    Description: "The ARN of the newly created role"

@@ -1,14 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 
-/**
- * @param {{
- * open: boolean;
- * onClose: () => void;
- * onSubmit: (payload: { role_arn: string; session_id: string }) => Promise<void>;
- * isSubmitting: boolean;
- * errorMessage: string | null;
- * }} props
- */
 export default function AWSConnectModal({
   open,
   onClose,
@@ -16,15 +7,14 @@ export default function AWSConnectModal({
   isSubmitting,
   errorMessage,
 }) {
-  const [roleArn, setRoleArn] = useState("");
   const [awsLink, setAwsLink] = useState("");
-
-  // unique session ID for this browser tab
+  const [isPolling, setIsPolling] = useState(false);
   const sessionId = useRef(crypto.randomUUID());
+  const pollingIntervalRef = useRef(null);
 
+  // Fetch the link when the modal opens
   useEffect(() => {
     if (!open) return;
-
     const fetchLink = async () => {
       try {
         const response = await fetch(
@@ -37,103 +27,106 @@ export default function AWSConnectModal({
       }
     };
     fetchLink();
+
+    return () => clearInterval(pollingIntervalRef.current);
   }, [open]);
+
+  // this checks the backend every 3 seconds once the user clicks the link, looking for that role to be created with the arn
+  useEffect(() => {
+    if (!isPolling) return;
+
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/aws-status?session_id=${sessionId.current}`,
+        );
+        if (response.ok) {
+          const data = await response.json();
+          // webhook success
+          if (data.status === "role_ready") {
+            clearInterval(pollingIntervalRef.current);
+            setIsPolling(false);
+            // auto submit
+            await onSubmit({ session_id: sessionId.current });
+          }
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 3000);
+
+    return () => clearInterval(pollingIntervalRef.current);
+  }, [isPolling, onSubmit]);
 
   if (!open) return null;
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    await onSubmit({
-      role_arn: roleArn.trim(),
-      session_id: sessionId.current,
-    });
-  }
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="aws-modal-title"
-    >
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 font-mono shadow-xl">
-        <h2
-          id="aws-modal-title"
-          className="text-lg font-semibold text-black mb-1"
-        >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 font-mono shadow-xl text-center">
+        <h2 className="text-xl font-semibold text-black mb-2">
           Connect AWS Account securely
         </h2>
-        <p className="text-xs text-gray-500 mb-6 leading-relaxed">
-          We open a CloudFormation quick-create that installs a limited IAM role
-          in <strong>your</strong> AWS account. Only this session&apos;s{" "}
-          <strong>ExternalId</strong> can be used when our backend calls{" "}
-          <strong>STS AssumeRole</strong>. When the stack finishes, copy the Role
-          ARN from the stack outputs.
-        </p>
-        <p className="text-xs text-gray-500 mb-6 leading-relaxed">
-          In AWS: scroll to the bottom, check &quot;I acknowledge&quot;, then click
-          Create stack.
-        </p>
 
-        {/* link*/}
-        <div className="mb-6 flex flex-col gap-2">
-          <span className="text-sm font-medium text-gray-700">
-            1. Create the connection
-          </span>
-          <a
-            href={awsLink}
-            target="_blank"
-            rel="noreferrer"
-            className={`flex justify-center items-center w-full rounded-lg border border-gray-200 px-4 py-3 text-sm font-medium transition-colors ${
-              awsLink
-                ? "bg-gray-50 text-black hover:bg-gray-100"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
-          >
-            {awsLink ? "Open AWS Quick-Create ↗" : "Generating secure link..."}
-          </a>
-        </div>
-
-        {/* input form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-sm">
-          <label className="flex flex-col gap-1 text-left">
-            <span className="font-medium text-gray-700">2. Paste Role ARN</span>
-            <input
-              type="text"
-              autoComplete="off"
-              value={roleArn}
-              onChange={(e) => setRoleArn(e.target.value)}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-[#C1C4FF]"
-              placeholder="arn:aws:iam::123456789012:role/CloudAssistant..."
-              required
-              disabled={isSubmitting}
-            />
-          </label>
-
-          {errorMessage ? (
-            <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
-              {errorMessage}
+        {/* before clicking the link */}
+        {!isPolling && !isSubmitting && (
+          <>
+            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+              We'll open AWS CloudFormation to automatically create a secure,
+              limited-access role for this session. Scroll to the bottom, check{" "}
+              <strong>"I acknowledge"</strong>, and click{" "}
+              <strong>Create stack</strong>.
             </p>
-          ) : null}
 
-          <div className="flex gap-2 justify-end mt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="px-4 py-2 rounded-full text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+            <a
+              href={awsLink}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setIsPolling(true)}
+              className={`flex justify-center items-center w-full rounded-lg px-4 py-3 text-base font-medium transition-colors ${
+                awsLink
+                  ? "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
+                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
+              }`}
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || !roleArn}
-              className="px-4 py-2 rounded-full bg-[#C1C4FF] text-black hover:bg-[#b8b7e8] disabled:opacity-50 transition-colors font-medium"
-            >
-              {isSubmitting ? "Validating…" : "Connect"}
-            </button>
+              {awsLink ? "Open AWS to Connect ↗" : "Generating secure link..."}
+            </a>
+          </>
+        )}
+
+        {/* wiat for the webhook */}
+        {(isPolling || isSubmitting) && (
+          <div className="flex flex-col items-center justify-center py-6">
+            <div className="w-8 h-8 border-4 border-[#C1C4FF] border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p className="text-sm font-medium text-gray-700">
+              {isSubmitting
+                ? "Finalizing connection..."
+                : "Waiting for AWS to create the role..."}
+            </p>
+            <p className="text-xs text-gray-400 mt-2">
+              This usually takes about 15 seconds.
+            </p>
           </div>
-        </form>
+        )}
+
+        {errorMessage && (
+          <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-4">
+            {errorMessage}
+          </p>
+        )}
+
+        <div className="flex justify-center mt-6">
+          <button
+            type="button"
+            onClick={() => {
+              clearInterval(pollingIntervalRef.current);
+              setIsPolling(false);
+              onClose();
+            }}
+            className="text-xs text-gray-400 hover:text-gray-600 underline"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
