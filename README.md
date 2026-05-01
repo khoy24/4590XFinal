@@ -151,11 +151,11 @@ Read-only calls (list buckets, describe VPCs, etc.) run as soon as you send the 
 
 **Cancel** on a bucket card dismisses without calling AWS.
 
-APIs: `POST /confirm-action` (`session_id`, `action_id`) and `POST /confirm-plan` (`session_id`, `plan_id`) — see [`backend/main.py`](backend/main.py).
+APIs: `POST /confirm-action` (`session_id`, `action_id`) and `POST /confirm-plan` (`session_id`, `plan_id`) — see [`backend/app/routers/chat.py`](backend/app/routers/chat.py) and [`backend/app/routers/vpc_starter.py`](backend/app/routers/vpc_starter.py).
 
 ## What the chat can do today
 
-The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read/list/describe** on S3, EC2 (`describe_instances`, `describe_security_groups`, `describe_vpcs`, `describe_route_tables`), IAM users, STS `GetCallerIdentity`, plus **S3 `create_bucket`** (staged → confirm).
+The backend allowlist (see [`backend/app/services/aws_actions.py`](backend/app/services/aws_actions.py)) includes **read/list/describe** on S3, EC2 (`describe_instances`, `describe_security_groups`, `describe_vpcs`, `describe_route_tables`), IAM users, STS `GetCallerIdentity`, plus **S3 `create_bucket`** (staged → confirm).
 
 **VPC networking writes** (VPC, subnets, IGW, routes, tags) are **not** meant to come from Gemini; they run only via **Guided VPC starter** → `confirm-plan`.
 
@@ -181,4 +181,4 @@ To help with quality and improve our products, human reviewers may read, annotat
 
 [`backend/role-template.yaml`](backend/role-template.yaml) grants an **inline** least-privilege policy aligned with this prototype: STS `GetCallerIdentity`, narrow S3, EC2 reads + VPC-starter writes, and IAM **read-only** listing/get user. Broad managed policies (**not** CloudFormation administrative access on this role) are intentionally omitted—the stack is created **by the user in the AWS console**, not via this IAM role.
 
-The quick-create URL in the app points at an S3-hosted copy of this template — **upload the updated YAML** there if your demo uses hosted quick-create ([`backend/main.py`](backend/main.py) `template_url`).
+The quick-create URL in the app points at an S3-hosted copy of this template — **upload the updated YAML** there if your demo uses hosted quick-create ([`backend/app/routers/aws_auth.py`](backend/app/routers/aws_auth.py) `template_url`).
