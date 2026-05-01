@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Role for CloudAssistant to manage infrastructure"
+Description: "Least-privilege role for CloudAssistant to manage infrastructure (STS assume-role + allowlisted APIs)"
 
 Parameters:
   ExternalID:
@@ -19,15 +19,57 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              # need from secrets
               AWS: !Sub "arn:aws:iam::${BackendAccountID}:root"
             Action: "sts:AssumeRole"
             Condition:
               StringEquals:
                 "sts:ExternalId": !Ref ExternalID
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
-        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+      Policies:
+        - PolicyName: CloudAssistantDemoMin
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: STSIdentity
+                Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                Resource: "*"
+              - Sid: S3ReadWriteDemo
+                Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:CreateBucket
+                  - s3:GetBucketLocation
+                Resource: "*"
+              - Sid: EC2Read
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeInternetGateways
+                Resource: "*"
+              - Sid: EC2VPCStarterWrites
+                Effect: Allow
+                Action:
+                  - ec2:CreateVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:CreateSubnet
+                  - ec2:CreateInternetGateway
+                  - ec2:AttachInternetGateway
+                  - ec2:CreateRouteTable
+                  - ec2:CreateRoute
+                  - ec2:AssociateRouteTable
+                  - ec2:CreateTags
+                Resource: "*"
+              - Sid: IAMReadDemo
+                Effect: Allow
+                Action:
+                  - iam:ListUsers
+                  - iam:GetUser
+                Resource: "*"
 
 Outputs:
   RoleARN:

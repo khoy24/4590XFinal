@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import AWSConnectModal from "./AWSConnectModal.jsx";
+import VPCStarterCard from "./VPCStarterCard.jsx";
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -46,11 +47,13 @@ function App() {
       text: "Hello! I am your Cloud Security Architect. Please connect your AWS account to get started.",
       actionResults: null,
       pendingActions: [],
+      pendingPlan: null,
     },
   ]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [confirmingActionId, setConfirmingActionId] = useState(null);
+  const [confirmingPlanId, setConfirmingPlanId] = useState(null);
 
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
@@ -104,6 +107,7 @@ function App() {
             text: "Successfully securely connected to AWS! What would you like to build today?",
             actionResults: null,
             pendingActions: [],
+            pendingPlan: null,
           },
         ]);
 
@@ -115,6 +119,115 @@ function App() {
       setConnectSubmitting(false);
     }
   };
+
+  const handleVpcPlanCreated = ({ plan_id, security_plan }) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "bot",
+        text: security_plan,
+        actionResults: [],
+        pendingActions: [],
+        pendingPlan: { plan_id, status: "open" },
+      },
+    ]);
+  };
+
+  const handleCancelPlan = (messageIndex) => {
+    setMessages((prev) =>
+      prev.map((m, i) => {
+        if (i !== messageIndex || m.role !== "bot" || !m.pendingPlan) return m;
+        return {
+          ...m,
+          pendingPlan: { ...m.pendingPlan, status: "cancelled" },
+        };
+      }),
+    );
+  };
+
+  const handleConfirmPlan = async (messageIndex, planPayload) => {
+    if (
+      !sessionId ||
+      confirmingActionId ||
+      confirmingPlanId ||
+      !planPayload?.plan_id
+    )
+      return;
+    setConfirmingPlanId(planPayload.plan_id);
+    try {
+      const response = await fetch(`${API_BASE}/confirm-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          plan_id: planPayload.plan_id,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const detailStr = (() => {
+          const d = data.detail;
+          if (typeof d === "string") return d;
+          if (Array.isArray(d))
+            return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
+          return null;
+        })();
+        if (response.status === 401) {
+          setAwsStatus("disconnected");
+          setSessionId(null);
+          setAccountId(null);
+          setUserArn(null);
+          setAwsRegion(null);
+        }
+        throw new Error(detailStr || `Confirm plan failed (${response.status}).`);
+      }
+
+      const results = data.results || [];
+      const okOverall =
+        results.length > 0 && results.every((r) => r.ok === true);
+
+      setMessages((prev) => {
+        const next = prev.map((m, i) => {
+          if (i !== messageIndex || m.role !== "bot") return m;
+          return {
+            ...m,
+            pendingPlan: m.pendingPlan
+              ? { ...m.pendingPlan, status: "confirmed" }
+              : null,
+          };
+        });
+        return [
+          ...next,
+          {
+            role: "bot",
+            text: okOverall
+              ? "VPC starter run finished. Resource details are below."
+              : "VPC starter run encountered errors before completion.",
+            actionResults: results,
+            pendingActions: [],
+            pendingPlan: null,
+          },
+        ];
+      });
+    } catch (err) {
+      console.error(err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "bot",
+          text: err.message || "Could not confirm that plan.",
+          actionResults: null,
+          pendingActions: [],
+          pendingPlan: null,
+        },
+      ]);
+    } finally {
+      setConfirmingPlanId(null);
+    }
+  };
+
+  const confirmingBusy = !!confirmingActionId || !!confirmingPlanId;
 
   const handleCancelPending = (messageIndex, pa) => {
     setMessages((prev) =>
@@ -131,7 +244,7 @@ function App() {
   };
 
   const handleConfirmPending = async (messageIndex, pa) => {
-    if (!sessionId || confirmingActionId) return;
+    if (!sessionId || confirmingBusy) return;
     setConfirmingActionId(pa.action_id);
     try {
       const response = await fetch(`${API_BASE}/confirm-action`, {
@@ -186,6 +299,7 @@ function App() {
               : `${label} failed: ${result?.error || "Unknown error"}`,
             actionResults: result ? [result] : [],
             pendingActions: [],
+            pendingPlan: null,
           },
         ];
       });
@@ -198,6 +312,7 @@ function App() {
           text: err.message || "Could not confirm that action.",
           actionResults: null,
           pendingActions: [],
+          pendingPlan: null,
         },
       ]);
     } finally {
@@ -214,6 +329,7 @@ function App() {
       text: inputText,
       actionResults: null,
       pendingActions: [],
+      pendingPlan: null,
     };
     setMessages((prev) => [...prev, userMessage]);
     setInputText("");
@@ -265,6 +381,7 @@ function App() {
             ...p,
             status: "open",
           })),
+          pendingPlan: null,
         },
       ]);
     } catch (error) {
@@ -278,6 +395,7 @@ function App() {
             "System Error: Could not reach the backend or chat failed.",
           actionResults: null,
           pendingActions: [],
+          pendingPlan: null,
         },
       ]);
     } finally {
@@ -295,7 +413,7 @@ function App() {
         errorMessage={connectError}
       />
 
-      <aside className="w-[55%] h-full flex flex-col justify-start items-center text-center pt-[5vh] px-[5vw]">
+      <aside className="w-[55%] h-full flex flex-col justify-start items-center text-center pt-[5vh] px-[5vw] overflow-y-auto pb-8">
         <div className="mb-4">
           <h1 className="text-4xl md:text-5xl font-normal text-black tracking-tight">
             Cloud Deployment Assistant
@@ -349,6 +467,17 @@ function App() {
             ARN outputs from CloudFormation.
           </p>
         </div>
+
+        {awsStatus === "connected" && sessionId ? (
+          <VPCStarterCard
+            sessionId={sessionId}
+            region={awsRegion}
+            disabled={
+              awsStatus !== "connected" || !sessionId || !awsRegion || isLoading
+            }
+            onPlanCreated={handleVpcPlanCreated}
+          />
+        ) : null}
       </aside>
 
       <section className="w-[45%] h-full py-[5vh] pr-[4vw] pl-[1vw]">
@@ -374,6 +503,42 @@ function App() {
                       <ul className="list-none mt-3 pt-3 border-t border-black/10">
                         {formatActionResults(msg.actionResults)}
                       </ul>
+                    ) : null}
+                    {msg.role === "bot" &&
+                    msg.pendingPlan?.status === "open" ? (
+                      <div className="mt-3 pt-3 border-t border-black/10">
+                        <div className="rounded-lg bg-white/90 p-3 text-left text-xs text-gray-800 ring-1 ring-black/10 space-y-2">
+                          <p className="font-semibold text-amber-900">
+                            Review VPC plan
+                          </p>
+                          <p className="text-gray-700 leading-relaxed">
+                            One confirmation runs the full VPC sequence in AWS
+                            (multiple API calls).
+                          </p>
+                          <div className="flex gap-2 justify-end pt-1">
+                            <button
+                              type="button"
+                              disabled={confirmingBusy}
+                              onClick={() => handleCancelPlan(index)}
+                              className="px-3 py-1.5 rounded-full text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-xs font-medium"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={confirmingBusy}
+                              onClick={() =>
+                                handleConfirmPlan(index, msg.pendingPlan)
+                              }
+                              className="px-3 py-1.5 rounded-full text-white bg-black hover:bg-gray-800 disabled:opacity-50 text-xs font-medium"
+                            >
+                              {confirmingPlanId === msg.pendingPlan.plan_id
+                                ? "Running…"
+                                : "Confirm plan"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     ) : null}
                     {msg.role === "bot" &&
                     (msg.pendingActions || []).some((p) => p.status === "open") ? (
@@ -405,7 +570,7 @@ function App() {
                               <div className="flex gap-2 mt-2 justify-end">
                                 <button
                                   type="button"
-                                  disabled={!!confirmingActionId}
+                                  disabled={confirmingBusy}
                                   onClick={() => handleCancelPending(index, p)}
                                   className="px-3 py-1.5 rounded-full text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-xs font-medium"
                                 >
@@ -413,7 +578,7 @@ function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={!!confirmingActionId}
+                                  disabled={confirmingBusy}
                                   onClick={() => handleConfirmPending(index, p)}
                                   className="px-3 py-1.5 rounded-full text-white bg-black hover:bg-gray-800 disabled:opacity-50 text-xs font-medium"
                                 >

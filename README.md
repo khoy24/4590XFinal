@@ -4,8 +4,19 @@ Friendly UI prototype for non-security professionals to work with AWS using natu
 
 ## Architecture (short)
 
-- **Frontend** ([`frontend`](frontend)): React + Vite. Connect flow opens CloudFormation quick-create; user pastes the Role ARN from stack outputs.
-- **Backend** ([`backend`](backend)): FastAPI. Stores per-tab session state in memory, calls Gemini on `/chat`, executes allowlisted operations. **Write** actions such as `s3.create_bucket` are staged until `POST /confirm-action`.
+- **Frontend** ([`frontend`](frontend)): React + Vite. Connect flow opens CloudFormation quick-create; user pastes the Role ARN from stack outputs. After connect, **Guided VPC starter** submits a staged plan and confirms it from the chat panel.
+- **Backend** ([`backend`](backend)): FastAPI. Stores per-tab session state in memory, calls Gemini on `/chat`, executes allowlisted operations. **Write** actions such as `s3.create_bucket` are staged until `POST /confirm-action`. The VPC starter workflow uses `POST /plan-vpc-starter` plus `POST /confirm-plan`.
+
+## HTTP API overview
+
+| Method | Path | Purpose |
+| ------ | ----- | ------- |
+| `GET` | `/generate-aws-link` | CloudFormation quick-create URL + session external ID |
+| `POST` | `/verify-role` | AssumeRole into the user stack’s role |
+| `POST` | `/chat` | Gemini + allowlisted AWS calls (writes may be staged) |
+| `POST` | `/confirm-action` | Run one staged chat write action (`action_id`) |
+| `POST` | `/plan-vpc-starter` | Validate inputs and stage a VPC starter **plan** (`plan_id`) |
+| `POST` | `/confirm-plan` | Run the staged VPC starter sequence |
 
 ## Prerequisites
 
@@ -107,8 +118,22 @@ Default UI: `http://localhost:5173` (CORS is configured for this origin in the b
 3. From the stack **Outputs**, copy the **Role ARN**.
 4. Paste the Role ARN into the modal and submit. The backend calls **AssumeRole** and stores **temporary** credentials in **server memory** for that session.
 5. After success, the sidebar shows **account ID**, **region**, and **assumed-role ARN** returned from `/verify-role`.
+6. **Guided VPC starter** appears in the sidebar: configure name/CIDR fields and click **Preview plan in chat** to review security notes in the thread, then **Confirm plan**.
 
 To **revoke** access: delete the CloudFormation stack or the IAM role in the AWS console.
+
+## Guided VPC starter
+
+For a concrete “secure network basics” demo without expecting the user to know AWS networking APIs:
+
+1. Connect AWS so the sidebar shows region and account.
+2. Fill in **project name** and optional CIDRs (defaults: `10.0.0.0/16`, public `10.0.1.0/24`, private `10.0.2.0/24`). **Region** must match the connected session (`/verify-role`).
+3. **Preview plan in chat** — the backend validates CIDR containment and overlaps, then stages a pending plan (`POST /plan-vpc-starter`).
+4. In the chat bubble, **Confirm plan** runs the sequence in AWS (`POST /confirm-plan`): VPC (DNS enabled), subnets, Internet Gateway, public routing to `0.0.0.0/0`, and Name tags.
+
+**Limits (prototype):** no rollback if a midpoint API fails; leftover resources may remain in AWS. Private subnets **do not** get a NAT Gateway or outbound routing. Sessions are **in-memory only** — restart clears pending plans/actions.
+
+Gemini `/chat` is instructed **not** to emit EC2 VPC **write** operations; use this guided flow for provisioning.
 
 ## Common AWS setup errors
 
@@ -117,15 +142,24 @@ To **revoke** access: delete the CloudFormation stack or the IAM role in the AWS
 - Modal stuck on `Generating secure link...`: check `frontend/.env`; `VITE_API_URL` should point to the backend, usually `http://127.0.0.1:8000`.
 - Stack already exists but connect fails: delete the stack and recreate it from the current quick-create link because the ExternalId is unique per browser session.
 
-## Write actions need your confirmation
+## Write actions and plans need your confirmation
 
-Read-only calls (list buckets, describe VPCs, etc.) run as soon as you send the chat message. **Mutating** actions that are allowed today—**S3 `create_bucket`**—are staged first: the assistant shows a **Review before running** card with a short risk summary. Nothing is executed until you click **Confirm**. **Cancel** dismisses the card without calling AWS.
+Read-only calls (list buckets, describe VPCs, etc.) run as soon as you send the chat message.
 
-The API for confirmation is `POST /confirm-action` with `session_id` and `action_id` (see [`backend/main.py`](backend/main.py)).
+- **Chat write:** **S3 `create_bucket`** is staged first — the assistant shows a **Review before running** card. Nothing executes until **Confirm**.
+- **Guided VPC:** the full VPC sequence is staged as one **plan**. **Confirm plan** runs multiple EC2 APIs in order; **Cancel** only dismisses the UI (discard the staged `plan_id` on the backend by not confirming — a new preview creates a fresh plan).
+
+**Cancel** on a bucket card dismisses without calling AWS.
+
+APIs: `POST /confirm-action` (`session_id`, `action_id`) and `POST /confirm-plan` (`session_id`, `plan_id`) — see [`backend/main.py`](backend/main.py).
 
 ## What the chat can do today
 
-The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read/list/describe** operations on S3, EC2 (instances, security groups, VPCs), IAM users, and STS `GetCallerIdentity`, plus **S3 `create_bucket`** (only after you confirm in the UI). Anything outside that list is rejected.
+The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read/list/describe** on S3, EC2 (`describe_instances`, `describe_security_groups`, `describe_vpcs`, `describe_route_tables`), IAM users, STS `GetCallerIdentity`, plus **S3 `create_bucket`** (staged → confirm).
+
+**VPC networking writes** (VPC, subnets, IGW, routes, tags) are **not** meant to come from Gemini; they run only via **Guided VPC starter** → `confirm-plan`.
+
+Anything outside the allowlist is rejected.
 
 ## Demo script (class)
 
@@ -133,8 +167,9 @@ The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read
 2. Show **Connect to AWS**: CloudFormation + ExternalId + paste Role ARN.
 3. Point out **account / region / ARN** after connect.
 4. Ask the assistant to **list S3 buckets** or **describe VPCs** (read-only; runs immediately).
-5. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel). Mention that read-only steps do not need this extra step.
-6. Mention **safety boundaries**: allowlisted APIs only, confirmation for writes, temporary creds, revoke via stack deletion.
+5. Optionally run **Guided VPC starter**: preview plan in chat → **Confirm plan**, then inspect **account / VPC / subnet IDs** in the results list.
+6. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel).
+7. Mention **safety boundaries**: allowlisted APIs only, staged writes/plans + confirmation, temporary creds, least-privilege role template (`role-template.yaml`), revoke via stack deletion.
 
 ## Gemini / privacy
 
@@ -144,4 +179,6 @@ To help with quality and improve our products, human reviewers may read, annotat
 
 ## IAM template in repo
 
-[`backend/role-template.yaml`](backend/role-template.yaml) is the logical source for the role; the quick-create URL in the app may point at a copy hosted in S3 — keep them in sync if you change permissions.
+[`backend/role-template.yaml`](backend/role-template.yaml) grants an **inline** least-privilege policy aligned with this prototype: STS `GetCallerIdentity`, narrow S3, EC2 reads + VPC-starter writes, and IAM **read-only** listing/get user. Broad managed policies (**not** CloudFormation administrative access on this role) are intentionally omitted—the stack is created **by the user in the AWS console**, not via this IAM role.
+
+The quick-create URL in the app points at an S3-hosted copy of this template — **upload the updated YAML** there if your demo uses hosted quick-create ([`backend/main.py`](backend/main.py) `template_url`).
