@@ -139,8 +139,8 @@ Copy and paste this link into your WEBHOOK_DOMAIN variable in your backend .env 
 
 1. Click **Connect to AWS** in the app.
 2. Open the generated **CloudFormation quick-create** link. Complete the stack (acknowledge and create). The template is parameterized with an **ExternalId** unique to this browser session.
-3. From the stack **Outputs**, copy the **Role ARN**.
-4. Paste the Role ARN into the modal and submit. The backend calls **AssumeRole** and stores **temporary** credentials in **server memory** for that session.
+3. Wait in the app. When the AWS stack finishes creating the role, a Lambda Custom Resource automatically fires a **Webhook**back to the backend with the new **Role ARN**.
+4. The frontend automatically detects the status change and submits the connection. The backend calls **AssumeRole** and stores **temporary** credentials in **server memory** for that session.
 5. After success, the sidebar shows **account ID**, **region**, and **assumed-role ARN** returned from `/verify-role`.
 6. **Guided VPC starter** appears in the sidebar: configure name/CIDR fields and click **Preview plan in chat** to review security notes in the thread, then **Confirm plan**.
 
