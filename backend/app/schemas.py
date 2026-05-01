@@ -32,7 +32,7 @@ class ChatResponse(BaseModel):
 
 class VerifyRoleRequest(BaseModel):
     session_id: str
-    role_arn: str
+    # role_arn: str
     region: str = "us-east-1"
 
 
@@ -66,3 +66,8 @@ class ConfirmPlanRequest(BaseModel):
 
 class ConfirmPlanResponse(BaseModel):
     results: list[ActionResultItem]
+
+# payload for webhook
+class WebhookPayload(BaseModel):
+    external_id: str
+    role_arn: str

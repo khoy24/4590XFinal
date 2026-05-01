@@ -9,37 +9,49 @@ Friendly UI prototype for non-security professionals to work with AWS using natu
 
 ## HTTP API overview
 
-| Method | Path | Purpose |
-| ------ | ----- | ------- |
-| `GET` | `/generate-aws-link` | CloudFormation quick-create URL + session external ID |
-| `POST` | `/verify-role` | AssumeRole into the user stack’s role |
-| `POST` | `/chat` | Gemini + allowlisted AWS calls (writes may be staged) |
-| `POST` | `/confirm-action` | Run one staged chat write action (`action_id`) |
-| `POST` | `/plan-vpc-starter` | Validate inputs and stage a VPC starter **plan** (`plan_id`) |
-| `POST` | `/confirm-plan` | Run the staged VPC starter sequence |
+| Method | Path                 | Purpose                                                      |
+| ------ | -------------------- | ------------------------------------------------------------ |
+| `GET`  | `/generate-aws-link` | CloudFormation quick-create URL + session external ID        |
+| `POST` | `/verify-role`       | AssumeRole into the user stack’s role                        |
+| `POST` | `/chat`              | Gemini + allowlisted AWS calls (writes may be staged)        |
+| `POST` | `/confirm-action`    | Run one staged chat write action (`action_id`)               |
+| `POST` | `/plan-vpc-starter`  | Validate inputs and stage a VPC starter **plan** (`plan_id`) |
+| `POST` | `/confirm-plan`      | Run the staged VPC starter sequence                          |
 
 ## Prerequisites
 
 - Node.js and npm (for the frontend)
 - Python 3 and pip (for the backend)
+- ngrok installed and authentication token set up
 - A **Gemini API key** ([Google AI Studio](https://aistudio.google.com/))
 - For AWS: the **account ID** of the machine/user that runs the backend (used as `AWS_BACKEND_ACCOUNT_ID` in the CloudFormation template trust policy)
 - AWS credentials configured for the **backend host** (environment variables, `~/.aws/credentials`, or IAM role) so it can call `sts:AssumeRole` into the role the user creates in **their** account
 - Optional but recommended: the **AWS CLI**, so you can run `aws configure` locally
 
+### Setting up ngrok
+
+Download ngrok from ngrok.com after creating a free account
+
+Configure your authentication token in the ngrok browser
+
+```bash
+ngrok config add-authtoken your_super_long_token_here
+```
+
 ## Environment variables
 
 ### Backend ([`backend/.env.example`](backend/.env.example))
 
-| Variable | Purpose |
-| -------- | ------- |
-| `GEMINI_API_KEY` | Google Gemini API key |
+| Variable                 | Purpose                                                                |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `GEMINI_API_KEY`         | Google Gemini API key                                                  |
 | `AWS_BACKEND_ACCOUNT_ID` | AWS account ID trusted in the user’s role template (quick-create link) |
+| `WEBHOOK_DOMAIN`         | ngrok webhook domain (copied after running the command)                |
 
 ### Frontend ([`frontend/.env.example`](frontend/.env.example))
 
-| Variable | Purpose |
-| -------- | ------- |
+| Variable       | Purpose                                        |
+| -------------- | ---------------------------------------------- |
 | `VITE_API_URL` | Backend base URL, e.g. `http://127.0.0.1:8000` |
 
 Create `.env` files:
@@ -91,6 +103,8 @@ These credentials belong to the backend host. Users should paste only the **Role
 
 ## Install and run
 
+You will need to have 3 terminals running. One for the backend, one for the frontend, and one for ngrok.
+
 ### Backend
 
 ```bash
@@ -111,12 +125,22 @@ npm run dev
 
 Default UI: `http://localhost:5173` (CORS is configured for this origin in the backend).
 
+### ngrok
+
+```bash
+ngrok http 8000
+```
+
+The result of this command will paste a link after Forwarding.
+(Forwarding link -> your_local_host)
+Copy and paste this link into your WEBHOOK_DOMAIN variable in your backend .env file.
+
 ## Connecting AWS (user flow)
 
 1. Click **Connect to AWS** in the app.
 2. Open the generated **CloudFormation quick-create** link. Complete the stack (acknowledge and create). The template is parameterized with an **ExternalId** unique to this browser session.
-3. From the stack **Outputs**, copy the **Role ARN**.
-4. Paste the Role ARN into the modal and submit. The backend calls **AssumeRole** and stores **temporary** credentials in **server memory** for that session.
+3. Wait in the app. When the AWS stack finishes creating the role, a Lambda Custom Resource automatically fires a **Webhook**back to the backend with the new **Role ARN**.
+4. The frontend automatically detects the status change and submits the connection. The backend calls **AssumeRole** and stores **temporary** credentials in **server memory** for that session.
 5. After success, the sidebar shows **account ID**, **region**, and **assumed-role ARN** returned from `/verify-role`.
 6. **Guided VPC starter** appears in the sidebar: configure name/CIDR fields and click **Preview plan in chat** to review security notes in the thread, then **Confirm plan**.
 

@@ -16,4 +16,9 @@ BACKEND_ACCOUNT_ID = os.getenv("AWS_BACKEND_ACCOUNT_ID")
 if not BACKEND_ACCOUNT_ID:
     print("WARNING: AWS_BACKEND_ACCOUNT_ID is missing from .env. The link will not work.")
 
+# added the ngrok webhook for the lambda call to auto fill-in the ARN 
+WEBHOOK_DOMAIN = os.getenv("WEBHOOK_DOMAIN")
+if not WEBHOOK_DOMAIN:
+    print("WARNING: WEBHOOK_DOMAIN is missing. Auto-webhook will fail. Use ngrok for local dev.")
+
 CORS_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
