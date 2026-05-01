@@ -51,6 +51,47 @@ ALLOWED_AWS_ACTIONS: dict[str, frozenset[str]] = {
     "sts": frozenset({"get_caller_identity"}),
 }
 
+# (service, operation) pairs that require explicit user confirmation before execution
+CONFIRMATION_REQUIRED_OPS: frozenset[tuple[str, str]] = frozenset(
+    {("s3", "create_bucket")}
+)
+
+
+def _needs_user_confirmation(service: str, operation: str) -> bool:
+    return (service, operation) in CONFIRMATION_REQUIRED_OPS
+
+
+def _validate_allowlisted_action(
+    raw: dict[str, Any],
+) -> tuple[bool, str, str, dict[str, Any]]:
+    """Return (is_valid, service, operation, params). Invalid means executor will report error."""
+    service = (raw.get("service") or "").strip().lower()
+    operation = (raw.get("operation") or "").strip()
+    params = raw.get("params") if raw.get("params") is not None else {}
+    if not isinstance(params, dict):
+        return False, service, operation, {}
+    allowed_ops = ALLOWED_AWS_ACTIONS.get(service)
+    if allowed_ops is None or operation not in allowed_ops:
+        return False, service, operation, params
+    return True, service, operation, params
+
+
+def _risk_summary_for_action(
+    service: str, operation: str, params: dict[str, Any]
+) -> str:
+    if service == "s3" and operation == "create_bucket":
+        name = params.get("Bucket", "(unnamed)")
+        return (
+            f"This will create a new S3 bucket named {name} in your account. "
+            "You may incur storage charges if objects are uploaded. "
+            "Confirm only if you intend to create this bucket."
+        )
+    return (
+        "This action can change resources in your AWS account. "
+        "Confirm only if you intend to proceed."
+    )
+
+
 # classes for the gemini chat
 class ChatRequest(BaseModel):
     prompt: str
@@ -63,15 +104,34 @@ class ActionResultItem(BaseModel):
     result: Any | None = None
     error: str | None = None
 
+
+class PendingActionItem(BaseModel):
+    action_id: str
+    service: str
+    operation: str
+    params: dict[str, Any] = {}
+    risk_summary: str
+
+
 class ChatResponse(BaseModel):
     reply: str
     action_results: list[ActionResultItem] = []
+    pending_actions: list[PendingActionItem] = []
 
 
 class VerifyRoleRequest(BaseModel):
     session_id: str
     role_arn: str
     region: str = "us-east-1"
+
+
+class ConfirmActionRequest(BaseModel):
+    session_id: str
+    action_id: str
+
+
+class ConfirmActionResponse(BaseModel):
+    result: ActionResultItem
 
 
 def _boto_session_from_stored(entry: dict[str, Any]) -> boto3.Session:
@@ -92,6 +152,42 @@ def _parse_gemini_json(text: str) -> dict[str, Any]:
     if fence:
         s = fence.group(1).strip()
     return json.loads(s)
+
+
+def _partition_actions_for_chat(
+    entry: dict[str, Any], actions: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[PendingActionItem]]:
+    """Split Gemini actions into those to execute immediately vs pending confirmation."""
+    entry.setdefault("pending_actions", {})
+    to_execute: list[dict[str, Any]] = []
+    pending_items: list[PendingActionItem] = []
+
+    for raw in actions:
+        valid, service, operation, params = _validate_allowlisted_action(raw)
+        if not valid:
+            to_execute.append(raw)
+            continue
+        normalized = {"service": service, "operation": operation, "params": params}
+        if _needs_user_confirmation(service, operation):
+            action_id = str(uuid.uuid4())
+            entry["pending_actions"][action_id] = {
+                "service": service,
+                "operation": operation,
+                "params": params,
+            }
+            pending_items.append(
+                PendingActionItem(
+                    action_id=action_id,
+                    service=service,
+                    operation=operation,
+                    params=params,
+                    risk_summary=_risk_summary_for_action(service, operation, params),
+                )
+            )
+        else:
+            to_execute.append(normalized)
+
+    return to_execute, pending_items
 
 
 @app.get("/generate-aws-link")
@@ -145,7 +241,8 @@ async def verify_aws_role(request: VerifyRoleRequest):
             },
             "account_id": assumed_role_user['Arn'].split(':')[4],
             "user_arn": assumed_role_user['Arn'],
-            "region": request.region
+            "region": request.region,
+            "pending_actions": {},
         }
         
         return {
@@ -160,6 +257,48 @@ async def verify_aws_role(request: VerifyRoleRequest):
         raise HTTPException(status_code=403, detail=f"Access Denied: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/confirm-action", response_model=ConfirmActionResponse)
+async def confirm_action(request: ConfirmActionRequest):
+    """Execute a previously staged write action after explicit user confirmation."""
+    entry = sessions.get(request.session_id)
+    if not entry or entry.get("status") != "active":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired session. Please connect your AWS account.",
+        )
+
+    pending = entry.setdefault("pending_actions", {})
+    action = pending.get(request.action_id)
+    if not action:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending action with that id. It may have expired or already run.",
+        )
+
+    service = action["service"]
+    operation = action["operation"]
+    params = action.get("params") or {}
+    if not _needs_user_confirmation(service, operation):
+        raise HTTPException(status_code=400, detail="This action does not require confirmation.")
+    allowed_ops = ALLOWED_AWS_ACTIONS.get(service)
+    if allowed_ops is None or operation not in allowed_ops:
+        raise HTTPException(status_code=400, detail="Action is no longer allowed.")
+    if not isinstance(params, dict):
+        raise HTTPException(status_code=400, detail="Invalid stored action parameters.")
+
+    pending.pop(request.action_id, None)
+    results = _execute_aws_actions(
+        entry,
+        [{"service": service, "operation": operation, "params": params}],
+    )
+    if not results:
+        raise HTTPException(status_code=500, detail="No result from executor.")
+    r = results[0]
+    if not r.get("ok"):
+        pending[request.action_id] = action
+    return ConfirmActionResponse(result=ActionResultItem(**r))
 
 
 def _execute_aws_actions(
@@ -304,6 +443,7 @@ You may ONLY use these allowed operations (service + operation):
 {allowed_block}
 
 Rules:
+- Mutating operations (such as s3 create_bucket) are never run immediately by the backend. They appear as pending until the user confirms in the app. In your explanation, say what would happen and that the user must confirm — do not state the resource was already created or already changed.
 - For create_bucket, include "Bucket" in params. If region is not us-east-1, add CreateBucketConfiguration with LocationConstraint equal to the region.
 - For get_user, include "UserName" when the user asks about a specific user.
 - Prefer read-only describe/list operations when the user only asks to view or list resources.
@@ -329,8 +469,19 @@ Rules:
     except (json.JSONDecodeError, ValueError, TypeError):
         actions = []
 
-    action_results = _execute_aws_actions(entry, actions)
+    entry.setdefault("pending_actions", {})
+    to_execute, pending_items = _partition_actions_for_chat(entry, actions)
+    action_results = _execute_aws_actions(entry, to_execute)
+
+    if pending_items:
+        explanation = (explanation or "").rstrip()
+        explanation += (
+            "\n\nAction required: review and confirm the pending change below "
+            "before it runs in AWS."
+        )
+
     return ChatResponse(
         reply=explanation,
         action_results=[ActionResultItem(**r) for r in action_results],
+        pending_actions=pending_items,
     )
