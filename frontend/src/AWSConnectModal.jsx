@@ -64,8 +64,15 @@ export default function AWSConnectModal({
           Connect AWS Account securely
         </h2>
         <p className="text-xs text-gray-500 mb-6 leading-relaxed">
-          When AWS opens, scroll to the bottom, check the 'I acknowledge' box,
-          and click Create stack.
+          We open a CloudFormation quick-create that installs a limited IAM role
+          in <strong>your</strong> AWS account. Only this session&apos;s{" "}
+          <strong>ExternalId</strong> can be used when our backend calls{" "}
+          <strong>STS AssumeRole</strong>. When the stack finishes, copy the Role
+          ARN from the stack outputs.
+        </p>
+        <p className="text-xs text-gray-500 mb-6 leading-relaxed">
+          In AWS: scroll to the bottom, check &quot;I acknowledge&quot;, then click
+          Create stack.
         </p>
 
         {/* link*/}
