@@ -45,10 +45,12 @@ function App() {
       role: "bot",
       text: "Hello! I am your Cloud Security Architect. Please connect your AWS account to get started.",
       actionResults: null,
+      pendingActions: [],
     },
   ]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [confirmingActionId, setConfirmingActionId] = useState(null);
 
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
@@ -101,6 +103,7 @@ function App() {
             role: "bot",
             text: "Successfully securely connected to AWS! What would you like to build today?",
             actionResults: null,
+            pendingActions: [],
           },
         ]);
 
@@ -113,11 +116,105 @@ function App() {
     }
   };
 
+  const handleCancelPending = (messageIndex, pa) => {
+    setMessages((prev) =>
+      prev.map((m, i) => {
+        if (i !== messageIndex || m.role !== "bot") return m;
+        return {
+          ...m,
+          pendingActions: (m.pendingActions || []).map((p) =>
+            p.action_id === pa.action_id ? { ...p, status: "cancelled" } : p,
+          ),
+        };
+      }),
+    );
+  };
+
+  const handleConfirmPending = async (messageIndex, pa) => {
+    if (!sessionId || confirmingActionId) return;
+    setConfirmingActionId(pa.action_id);
+    try {
+      const response = await fetch(`${API_BASE}/confirm-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          action_id: pa.action_id,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const detailStr = (() => {
+          const d = data.detail;
+          if (typeof d === "string") return d;
+          if (Array.isArray(d))
+            return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
+          return null;
+        })();
+        if (response.status === 401) {
+          setAwsStatus("disconnected");
+          setSessionId(null);
+          setAccountId(null);
+          setUserArn(null);
+          setAwsRegion(null);
+        }
+        throw new Error(detailStr || `Confirm failed (${response.status}).`);
+      }
+
+      const result = data.result;
+      setMessages((prev) => {
+        const next = prev.map((m, i) => {
+          if (i !== messageIndex || m.role !== "bot") return m;
+          return {
+            ...m,
+            pendingActions: (m.pendingActions || []).map((p) =>
+              p.action_id === pa.action_id ? { ...p, status: "confirmed" } : p,
+            ),
+          };
+        });
+        const ok = result?.ok;
+        const label = result
+          ? `${result.service}.${result.operation}`
+          : "Action";
+        return [
+          ...next,
+          {
+            role: "bot",
+            text: ok
+              ? `${label} completed successfully.`
+              : `${label} failed: ${result?.error || "Unknown error"}`,
+            actionResults: result ? [result] : [],
+            pendingActions: [],
+          },
+        ];
+      });
+    } catch (err) {
+      console.error(err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "bot",
+          text: err.message || "Could not confirm that action.",
+          actionResults: null,
+          pendingActions: [],
+        },
+      ]);
+    } finally {
+      setConfirmingActionId(null);
+    }
+  };
+
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!inputText.trim() || awsStatus !== "connected" || !sessionId) return;
 
-    const userMessage = { role: "user", text: inputText, actionResults: null };
+    const userMessage = {
+      role: "user",
+      text: inputText,
+      actionResults: null,
+      pendingActions: [],
+    };
     setMessages((prev) => [...prev, userMessage]);
     setInputText("");
     setIsLoading(true);
@@ -164,6 +261,10 @@ function App() {
           role: "bot",
           text: data.reply,
           actionResults: data.action_results || [],
+          pendingActions: (data.pending_actions || []).map((p) => ({
+            ...p,
+            status: "open",
+          })),
         },
       ]);
     } catch (error) {
@@ -176,6 +277,7 @@ function App() {
             error.message ||
             "System Error: Could not reach the backend or chat failed.",
           actionResults: null,
+          pendingActions: [],
         },
       ]);
     } finally {
@@ -267,11 +369,62 @@ function App() {
                           : "bg-[#C1C4FF] text-black rounded-bl-none shadow-sm"
                     }`}
                   >
-                    <div>{msg.text}</div>
+                    <div className="whitespace-pre-wrap">{msg.text}</div>
                     {msg.role === "bot" && msg.actionResults?.length ? (
                       <ul className="list-none mt-3 pt-3 border-t border-black/10">
                         {formatActionResults(msg.actionResults)}
                       </ul>
+                    ) : null}
+                    {msg.role === "bot" &&
+                    (msg.pendingActions || []).some((p) => p.status === "open") ? (
+                      <div className="mt-3 pt-3 border-t border-black/10 space-y-3">
+                        {(msg.pendingActions || [])
+                          .filter((p) => p.status === "open")
+                          .map((p) => (
+                            <div
+                              key={p.action_id}
+                              className="rounded-lg bg-white/90 p-3 text-left text-xs text-gray-800 ring-1 ring-black/10"
+                            >
+                              <p className="font-semibold text-amber-900">
+                                Review before running
+                              </p>
+                              <p className="text-gray-700 mt-1 leading-relaxed">
+                                {p.risk_summary}
+                              </p>
+                              <pre className="mt-2 whitespace-pre-wrap break-words bg-white/80 rounded-md p-2 max-h-32 overflow-y-auto text-[11px] text-gray-900">
+                                {JSON.stringify(
+                                  {
+                                    service: p.service,
+                                    operation: p.operation,
+                                    params: p.params,
+                                  },
+                                  null,
+                                  2,
+                                )}
+                              </pre>
+                              <div className="flex gap-2 mt-2 justify-end">
+                                <button
+                                  type="button"
+                                  disabled={!!confirmingActionId}
+                                  onClick={() => handleCancelPending(index, p)}
+                                  className="px-3 py-1.5 rounded-full text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-xs font-medium"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!!confirmingActionId}
+                                  onClick={() => handleConfirmPending(index, p)}
+                                  className="px-3 py-1.5 rounded-full text-white bg-black hover:bg-gray-800 disabled:opacity-50 text-xs font-medium"
+                                >
+                                  {confirmingActionId === p.action_id
+                                    ? "Running…"
+                                    : "Confirm"}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
                     ) : null}
                   </div>
                 </div>

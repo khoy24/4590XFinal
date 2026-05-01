@@ -5,7 +5,7 @@ Friendly UI prototype for non-security professionals to work with AWS using natu
 ## Architecture (short)
 
 - **Frontend** ([`frontend`](frontend)): React + Vite. Connect flow opens CloudFormation quick-create; user pastes the Role ARN from stack outputs.
-- **Backend** ([`backend`](backend)): FastAPI. Stores per-tab session state in memory, calls Gemini on `/chat`, executes only operations in `ALLOWED_AWS_ACTIONS` in [`backend/main.py`](backend/main.py).
+- **Backend** ([`backend`](backend)): FastAPI. Stores per-tab session state in memory, calls Gemini on `/chat`, executes allowlisted operations. **Write** actions such as `s3.create_bucket` are staged until `POST /confirm-action`.
 
 ## Prerequisites
 
@@ -117,18 +117,24 @@ To **revoke** access: delete the CloudFormation stack or the IAM role in the AWS
 - Modal stuck on `Generating secure link...`: check `frontend/.env`; `VITE_API_URL` should point to the backend, usually `http://127.0.0.1:8000`.
 - Stack already exists but connect fails: delete the stack and recreate it from the current quick-create link because the ExternalId is unique per browser session.
 
+## Write actions need your confirmation
+
+Read-only calls (list buckets, describe VPCs, etc.) run as soon as you send the chat message. **Mutating** actions that are allowed today—**S3 `create_bucket`**—are staged first: the assistant shows a **Review before running** card with a short risk summary. Nothing is executed until you click **Confirm**. **Cancel** dismisses the card without calling AWS.
+
+The API for confirmation is `POST /confirm-action` with `session_id` and `action_id` (see [`backend/main.py`](backend/main.py)).
+
 ## What the chat can do today
 
-The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read/list/describe** operations on S3, EC2 (instances, security groups, VPCs), IAM users, and STS `GetCallerIdentity`, plus **S3 `create_bucket`**. Anything outside that list is rejected.
+The backend allowlist (see [`backend/main.py`](backend/main.py)) includes **read/list/describe** operations on S3, EC2 (instances, security groups, VPCs), IAM users, and STS `GetCallerIdentity`, plus **S3 `create_bucket`** (only after you confirm in the UI). Anything outside that list is rejected.
 
 ## Demo script (class)
 
 1. Explain the problem: AWS security setup is hard for non-experts.
 2. Show **Connect to AWS**: CloudFormation + ExternalId + paste Role ARN.
 3. Point out **account / region / ARN** after connect.
-4. Ask the assistant to **list S3 buckets** or **describe VPCs** (read-only).
-5. Optionally show **create bucket** or an error if the role lacks permission.
-6. Mention **safety boundaries**: allowlisted APIs only, temporary creds, revoke via stack deletion.
+4. Ask the assistant to **list S3 buckets** or **describe VPCs** (read-only; runs immediately).
+5. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel). Mention that read-only steps do not need this extra step.
+6. Mention **safety boundaries**: allowlisted APIs only, confirmation for writes, temporary creds, revoke via stack deletion.
 
 ## Gemini / privacy
 
