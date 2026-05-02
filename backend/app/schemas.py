@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
     prompt: str
-    session_id: str
 
 
 class ActionResultItem(BaseModel):
@@ -31,13 +30,10 @@ class ChatResponse(BaseModel):
 
 
 class VerifyRoleRequest(BaseModel):
-    session_id: str
-    # role_arn: str
     region: str = "us-east-1"
 
 
 class ConfirmActionRequest(BaseModel):
-    session_id: str
     action_id: str
 
 
@@ -46,7 +42,6 @@ class ConfirmActionResponse(BaseModel):
 
 
 class PlanVpcStarterRequest(BaseModel):
-    session_id: str
     project_name: str
     region: str | None = None
     vpc_cidr: str = "10.0.0.0/16"
@@ -60,12 +55,12 @@ class PlanVpcStarterResponse(BaseModel):
 
 
 class ConfirmPlanRequest(BaseModel):
-    session_id: str
     plan_id: str
 
 
 class ConfirmPlanResponse(BaseModel):
     results: list[ActionResultItem]
+
 
 # payload for webhook
 class WebhookPayload(BaseModel):

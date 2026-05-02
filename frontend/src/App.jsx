@@ -1,8 +1,18 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import AWSConnectModal from "./AWSConnectModal.jsx";
+import AuthForm from "./AuthForm.jsx";
 import VPCStarterCard from "./VPCStarterCard.jsx";
 
 const API_BASE = import.meta.env.VITE_API_URL;
+
+const AWS_REGION_OPTIONS = [
+  "us-east-1",
+  "us-east-2",
+  "us-west-1",
+  "us-west-2",
+  "eu-west-1",
+  "eu-central-1",
+];
 
 function formatActionResults(actionResults) {
   if (!actionResults || actionResults.length === 0) return null;
@@ -32,19 +42,22 @@ function formatActionResults(actionResults) {
 }
 
 function App() {
+  const [authUser, setAuthUser] = useState(null);
   const [awsStatus, setAwsStatus] = useState("disconnected");
-  const [sessionId, setSessionId] = useState(null);
   const [accountId, setAccountId] = useState(null);
   const [userArn, setUserArn] = useState(null);
   const [awsRegion, setAwsRegion] = useState(null);
+  const [connectRegion, setConnectRegion] = useState("us-east-1");
   const [modalOpen, setModalOpen] = useState(false);
+  const [connectModalKey, setConnectModalKey] = useState(0);
   const [connectSubmitting, setConnectSubmitting] = useState(false);
   const [connectError, setConnectError] = useState(null);
+  const [authBootPending, setAuthBootPending] = useState(true);
 
   const [messages, setMessages] = useState([
     {
       role: "bot",
-      text: "Hello! I am your Cloud Security Architect. Please connect your AWS account to get started.",
+      text: "Hello! I am your Cloud Security Architect. Register or sign in, then connect your AWS account.",
       actionResults: null,
       pendingActions: [],
       pendingPlan: null,
@@ -63,9 +76,117 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
+  const resetAwsUi = () => {
+    setAwsStatus("disconnected");
+    setAccountId(null);
+    setUserArn(null);
+    setAwsRegion(null);
+  };
+
+  const loadAwsConnection = useCallback(async () => {
+    const response = await fetch(`${API_BASE}/aws-connection/current`, {
+      credentials: "include",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.connected === true) {
+      setAwsStatus("connected");
+      setAccountId(data.account_id ?? null);
+      setUserArn(data.user_arn ?? null);
+      setAwsRegion(data.region ?? null);
+      if (data.region) setConnectRegion(data.region);
+    } else {
+      resetAwsUi();
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setAuthBootPending(true);
+      try {
+        const me = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+        if (cancelled) return;
+        if (me.ok) {
+          const u = await me.json();
+          if (u?.id) {
+            setAuthUser(u);
+            await loadAwsConnection();
+          } else {
+            setAuthUser(null);
+            resetAwsUi();
+          }
+        } else {
+          setAuthUser(null);
+          resetAwsUi();
+        }
+      } catch {
+        if (!cancelled) {
+          setAuthUser(null);
+          resetAwsUi();
+        }
+      } finally {
+        if (!cancelled) setAuthBootPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAwsConnection]);
+
+  const handleAuthenticated = async (user) => {
+    setAuthUser(user);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "bot",
+        text: `Signed in as ${user.email}. Connect your AWS account when you are ready.`,
+        actionResults: null,
+        pendingActions: [],
+        pendingPlan: null,
+      },
+    ]);
+    await loadAwsConnection();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      /* ignore */
+    }
+    setAuthUser(null);
+    resetAwsUi();
+  };
+
+  const handleForgetAws = async () => {
+    try {
+      await fetch(`${API_BASE}/aws-connection`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+    } catch {
+      /* ignore */
+    }
+    resetAwsUi();
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "bot",
+        text: "AWS connection removed from this app. Delete the CloudFormation stack in AWS to fully revoke IAM access.",
+        actionResults: null,
+        pendingActions: [],
+        pendingPlan: null,
+      },
+    ]);
+  };
+
   const handleConnectAWS = () => {
-    if (awsStatus === "connected" || connectSubmitting) return;
+    if (!authUser || awsStatus === "connected" || connectSubmitting) return;
     setConnectError(null);
+    setConnectModalKey((k) => k + 1);
     setModalOpen(true);
   };
 
@@ -75,30 +196,31 @@ function App() {
     setConnectError(null);
   };
 
-  const handleModalSubmit = async (payload) => {
+  const handleModalSubmit = async () => {
     setConnectSubmitting(true);
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/verify-role`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      );
+      const response = await fetch(`${API_BASE}/verify-role`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ region: connectRegion }),
+      });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        setConnectError(data.detail || "Connection failed.");
+        setConnectError(
+          typeof data.detail === "string"
+            ? data.detail
+            : "Connection failed.",
+        );
       } else {
         setConnectError(null);
         setAwsStatus("connected");
-        setSessionId(payload.session_id);
         setAccountId(data.account_id ?? null);
         setUserArn(data.user_arn ?? null);
-        setAwsRegion(data.region ?? null);
+        setAwsRegion(data.region ?? connectRegion ?? null);
 
         setMessages((prev) => [
           ...prev,
@@ -147,7 +269,7 @@ function App() {
 
   const handleConfirmPlan = async (messageIndex, planPayload) => {
     if (
-      !sessionId ||
+      awsStatus !== "connected" ||
       confirmingActionId ||
       confirmingPlanId ||
       !planPayload?.plan_id
@@ -157,9 +279,9 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/confirm-plan`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
           plan_id: planPayload.plan_id,
         }),
       });
@@ -173,13 +295,7 @@ function App() {
             return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
           return null;
         })();
-        if (response.status === 401) {
-          setAwsStatus("disconnected");
-          setSessionId(null);
-          setAccountId(null);
-          setUserArn(null);
-          setAwsRegion(null);
-        }
+        if (response.status === 401) resetAwsUi();
         throw new Error(detailStr || `Confirm plan failed (${response.status}).`);
       }
 
@@ -244,14 +360,14 @@ function App() {
   };
 
   const handleConfirmPending = async (messageIndex, pa) => {
-    if (!sessionId || confirmingBusy) return;
+    if (awsStatus !== "connected" || confirmingBusy) return;
     setConfirmingActionId(pa.action_id);
     try {
       const response = await fetch(`${API_BASE}/confirm-action`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
           action_id: pa.action_id,
         }),
       });
@@ -265,13 +381,7 @@ function App() {
             return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
           return null;
         })();
-        if (response.status === 401) {
-          setAwsStatus("disconnected");
-          setSessionId(null);
-          setAccountId(null);
-          setUserArn(null);
-          setAwsRegion(null);
-        }
+        if (response.status === 401) resetAwsUi();
         throw new Error(detailStr || `Confirm failed (${response.status}).`);
       }
 
@@ -322,7 +432,7 @@ function App() {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputText.trim() || awsStatus !== "connected" || !sessionId) return;
+    if (!inputText.trim() || awsStatus !== "connected") return;
 
     const userMessage = {
       role: "user",
@@ -338,10 +448,10 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/chat`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: userMessage.text,
-          session_id: sessionId,
         }),
       });
 
@@ -357,13 +467,9 @@ function App() {
         })();
 
         if (response.status === 401) {
-          setAwsStatus("disconnected");
-          setSessionId(null);
-          setAccountId(null);
-          setUserArn(null);
-          setAwsRegion(null);
+          resetAwsUi();
           throw new Error(
-            detailStr || "Session expired. Please connect AWS again.",
+            detailStr || "Reconnect your AWS account to continue chatting.",
           );
         }
         throw new Error(
@@ -406,11 +512,13 @@ function App() {
   return (
     <div className="flex h-screen w-screen bg-white font-mono overflow-hidden">
       <AWSConnectModal
+        key={connectModalKey}
         open={modalOpen}
         onClose={handleModalClose}
         onSubmit={handleModalSubmit}
         isSubmitting={connectSubmitting}
         errorMessage={connectError}
+        awsRegion={connectRegion}
       />
 
       <aside className="w-[55%] h-full flex flex-col justify-start items-center text-center pt-[5vh] px-[5vw] overflow-y-auto pb-8">
@@ -423,16 +531,71 @@ function App() {
           </p>
         </div>
 
-        <button
-          onClick={handleConnectAWS}
-          className={`px-10 py-2 font-medium text-xl rounded-full transition-all duration-200 shadow-sm ${
-            awsStatus === "connected"
-              ? "bg-green-100 text-green-800"
-              : "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
-          }`}
-        >
-          {awsStatus === "connected" ? "AWS Connected" : "Connect to AWS"}
-        </button>
+        {authBootPending ? (
+          <p className="text-xs text-gray-400 mb-6">Loading…</p>
+        ) : !authUser ? (
+          <AuthForm onAuthed={handleAuthenticated} />
+        ) : (
+          <div className="w-full max-w-md space-y-4 mb-6">
+            <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-left">
+              <p className="text-xs text-gray-700">
+                Signed in as <strong>{authUser.email}</strong>
+              </p>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="text-xs underline text-gray-500 hover:text-gray-800 shrink-0"
+              >
+                Log out
+              </button>
+            </div>
+
+            {awsStatus !== "connected" ? (
+              <label className="block text-left text-xs">
+                <span className="text-gray-600 font-medium">
+                  Default region after connect (EC2/APIs)
+                </span>
+                <select
+                  value={connectRegion}
+                  onChange={(e) => setConnectRegion(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-black bg-white"
+                >
+                  {AWS_REGION_OPTIONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        )}
+
+        {authUser ? (
+          <button
+            onClick={handleConnectAWS}
+            disabled={
+              awsStatus === "connected" || connectSubmitting
+            }
+            className={`px-10 py-2 font-medium text-xl rounded-full transition-all duration-200 shadow-sm ${
+              awsStatus === "connected"
+                ? "bg-green-100 text-green-800"
+                : "bg-[#C1C4FF] text-black hover:bg-[#b8b7e8]"
+            }`}
+          >
+            {awsStatus === "connected" ? "AWS Connected" : "Connect to AWS"}
+          </button>
+        ) : null}
+
+        {authUser && awsStatus === "connected" ? (
+          <button
+            type="button"
+            onClick={handleForgetAws}
+            className="mt-3 text-xs text-gray-500 underline hover:text-gray-800"
+          >
+            Forget AWS connection
+          </button>
+        ) : null}
 
         {awsStatus === "connected" && accountId ? (
           <div className="mt-4 max-w-md text-xs text-gray-600 text-left space-y-1">
@@ -446,34 +609,35 @@ function App() {
             ) : null}
             {userArn ? (
               <p className="break-all">
-                <strong>ARN:</strong> {userArn}
+                <strong>Role session:</strong> {userArn}
               </p>
             ) : null}
           </div>
         ) : null}
 
-        <div className="max-w-[300px] pt-[3vh] text-xs text-gray-400 leading-relaxed mt-2 space-y-4">
+        <div className="max-w-[320px] pt-[3vh] text-xs text-gray-400 leading-relaxed mt-2 space-y-4">
           <p>
-            <strong>How it works:</strong> You create an IAM role in your account
-            via the AWS CloudFormation quick-create link. The stack uses an{" "}
-            <strong>ExternalId</strong> so only this app can assume that role.
-            We call <strong>STS AssumeRole</strong>, store the resulting{" "}
-            <strong>temporary</strong> credentials in server memory for your
-            session, then run only allowlisted API calls. Delete the stack or
-            role in AWS to revoke access.
+            <strong>How it works:</strong> Sign in binds your workspace. You create
+            an IAM role in your account via the CloudFormation quick-create link
+            once. We store the role metadata encrypted on the server, use{" "}
+            <strong>ExternalId</strong> for AssumeRole, and keep{" "}
+            <strong>temporary</strong> STS credentials only in server memory (
+            refreshed automatically). Allowlisted APIs only. Delete the stack or
+            role in AWS to revoke access entirely.
           </p>
           <p>
-            You never paste long-term access keys into this app — only the Role
-            ARN outputs from CloudFormation.
+            Long-term IAM access keys never go in the browser — the CloudFormation
+            webhook registers the Role ARN on the backend.
           </p>
         </div>
 
-        {awsStatus === "connected" && sessionId ? (
+        {authUser &&
+        awsStatus === "connected" &&
+        awsRegion ? (
           <VPCStarterCard
-            sessionId={sessionId}
             region={awsRegion}
             disabled={
-              awsStatus !== "connected" || !sessionId || !awsRegion || isLoading
+              awsStatus !== "connected" || !awsRegion || isLoading
             }
             onPlanCreated={handleVpcPlanCreated}
           />
@@ -615,7 +779,7 @@ function App() {
                 onChange={(e) => {
                   setInputText(e.target.value);
                   e.target.style.height = "auto";
-                  e.target.style.height = e.target.scrollHeight + "px";
+                  e.target.style.height = `${e.target.scrollHeight}px`;
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -629,11 +793,13 @@ function App() {
                 rows={1}
               />
 
-              <div className="p-2 flex-shrink-0">
+              <div className="p-2 shrink-0">
                 <button
                   type="submit"
                   disabled={
-                    !inputText.trim() || awsStatus !== "connected" || isLoading
+                    !inputText.trim() ||
+                    awsStatus !== "connected" ||
+                    isLoading
                   }
                   className="p-2 bg-[#C1C4FF] rounded-xl text-black hover:bg-[#b8b7e8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                 >
@@ -648,8 +814,8 @@ function App() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <line x1="7" y1="17" x2="17" y2="7"></line>
-                    <polyline points="7 7 17 7 17 17"></polyline>
+                    <line x1="7" y1="17" x2="17" y2="7" />
+                    <polyline points="7 7 17 7 17 17" />
                   </svg>
                 </button>
               </div>
