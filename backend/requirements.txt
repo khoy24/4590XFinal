@@ -2,5 +2,10 @@ fastapi
 uvicorn
 google-generativeai
 pydantic
+email-validator
 python-dotenv
 boto3
+sqlalchemy
+passlib[bcrypt]
+bcrypt>=4.0.1,<5
+cryptography

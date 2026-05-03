@@ -23,10 +23,11 @@ def parse_gemini_json(text: str) -> dict[str, Any]:
 
 
 def partition_actions_for_chat(
-    entry: dict[str, Any], actions: list[dict[str, Any]]
+    workspace_entry: dict[str, Any],
+    actions: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[PendingActionItem]]:
     """Split Gemini actions into those to execute immediately vs pending confirmation."""
-    entry.setdefault("pending_actions", {})
+    workspace_entry.setdefault("pending_actions", {})
     to_execute: list[dict[str, Any]] = []
     pending_items: list[PendingActionItem] = []
 
@@ -38,7 +39,7 @@ def partition_actions_for_chat(
         normalized = {"service": service, "operation": operation, "params": params}
         if needs_user_confirmation(service, operation):
             action_id = str(uuid.uuid4())
-            entry["pending_actions"][action_id] = {
+            workspace_entry["pending_actions"][action_id] = {
                 "service": service,
                 "operation": operation,
                 "params": params,
@@ -60,7 +61,6 @@ def partition_actions_for_chat(
 
 def build_chat_full_prompt(
     account_id: str,
-    user_arn: str,
     region: str,
     user_prompt: str,
 ) -> str:
@@ -70,7 +70,7 @@ def build_chat_full_prompt(
     )
 
     system_prompt = f"""You are a Cloud Security Architect helping a non-technical user work with AWS safely.
-The user is connected to AWS account {account_id} in region {region}. Their IAM principal ARN: {user_arn}.
+The user has connected via a limited IAM role assumed by our backend using STS into AWS account {account_id} (region {region}). Do not invent ARNs or credentials; rely on aws_actions below for API calls only.
 
 You MUST respond with ONLY a single JSON object (no markdown, no backticks, no other text) with this exact shape:
 {{

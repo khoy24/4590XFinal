@@ -1,53 +1,69 @@
 import { useState, useEffect, useRef } from "react";
 
+const API_BASE = import.meta.env.VITE_API_URL;
+
+/**
+ * CloudFormation quick-create + poll + verify-role (cookie-auth user).
+ *
+ * @param {{
+ *   open: boolean;
+ *   onClose: () => void;
+ *   onSubmit: () => Promise<void>;
+ *   isSubmitting: boolean;
+ *   errorMessage: string | null;
+ *   awsRegion?: string;
+ * }} props
+ */
 export default function AWSConnectModal({
   open,
   onClose,
   onSubmit,
   isSubmitting,
   errorMessage,
+  awsRegion = "us-east-1",
 }) {
   const [awsLink, setAwsLink] = useState("");
   const [isPolling, setIsPolling] = useState(false);
-  const sessionId = useRef(crypto.randomUUID());
   const pollingIntervalRef = useRef(null);
 
-  // Fetch the link when the modal opens
   useEffect(() => {
     if (!open) return;
-    const fetchLink = async () => {
+
+    async function fetchLink() {
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/generate-aws-link?user_id=${sessionId.current}`,
-        );
-        const data = await response.json();
+        const response = await fetch(`${API_BASE}/generate-aws-link`, {
+          credentials: "include",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setAwsLink("");
+          console.error("generate-aws-link:", data.detail || response.status);
+          return;
+        }
         setAwsLink(data.link);
       } catch (error) {
         console.error("Failed to load AWS link", error);
       }
-    };
-    fetchLink();
+    }
 
+    fetchLink();
     return () => clearInterval(pollingIntervalRef.current);
   }, [open]);
 
-  // this checks the backend every 3 seconds once the user clicks the link, looking for that role to be created with the arn
   useEffect(() => {
     if (!isPolling) return;
 
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/aws-status?session_id=${sessionId.current}`,
-        );
+        const response = await fetch(`${API_BASE}/aws-status`, {
+          credentials: "include",
+        });
         if (response.ok) {
           const data = await response.json();
-          // webhook success
           if (data.status === "role_ready") {
             clearInterval(pollingIntervalRef.current);
             setIsPolling(false);
-            // auto submit
-            await onSubmit({ session_id: sessionId.current });
+            await onSubmit();
           }
         }
       } catch (error) {
@@ -56,7 +72,7 @@ export default function AWSConnectModal({
     }, 3000);
 
     return () => clearInterval(pollingIntervalRef.current);
-  }, [isPolling, onSubmit]);
+  }, [isPolling, onSubmit, awsRegion]);
 
   if (!open) return null;
 
@@ -64,17 +80,22 @@ export default function AWSConnectModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white p-6 font-mono shadow-xl text-center">
         <h2 className="text-xl font-semibold text-black mb-2">
-          Connect AWS Account securely
+          Connect AWS account securely
         </h2>
 
-        {/* before clicking the link */}
         {!isPolling && !isSubmitting && (
           <>
-            <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-              We'll open AWS CloudFormation to automatically create a secure,
-              limited-access role for this session. Scroll to the bottom, check{" "}
-              <strong>"I acknowledge"</strong>, and click{" "}
-              <strong>Create stack</strong>.
+            <p className="text-sm text-gray-500 mb-2 leading-relaxed">
+              We'll open AWS CloudFormation to create a secure, limited-access
+              role in your account ({awsRegion}). Use the stack name{" "}
+              <strong>CloudAssistant</strong> from the generated link when
+              needed. Scroll to the bottom, check <strong>I acknowledge</strong>
+              , and click <strong>Create stack</strong>.
+            </p>
+            <p className="text-xs text-gray-400 mb-4">
+              Your connection persists after you log in again; you only recreate
+              the stack if you revoke it in AWS or use &quot;Forget AWS&quot;
+              here.
             </p>
 
             <a
@@ -93,17 +114,16 @@ export default function AWSConnectModal({
           </>
         )}
 
-        {/* wiat for the webhook */}
         {(isPolling || isSubmitting) && (
           <div className="flex flex-col items-center justify-center py-6">
-            <div className="w-8 h-8 border-4 border-[#C1C4FF] border-t-transparent rounded-full animate-spin mb-4"></div>
+            <div className="w-8 h-8 border-4 border-[#C1C4FF] border-t-transparent rounded-full animate-spin mb-4" />
             <p className="text-sm font-medium text-gray-700">
               {isSubmitting
                 ? "Finalizing connection..."
                 : "Waiting for AWS to create the role..."}
             </p>
             <p className="text-xs text-gray-400 mt-2">
-              This usually takes about 15 seconds.
+              This usually takes about 30-60 seconds.
             </p>
           </div>
         )}
@@ -122,7 +142,8 @@ export default function AWSConnectModal({
               setIsPolling(false);
               onClose();
             }}
-            className="text-xs text-gray-400 hover:text-gray-600 underline"
+            disabled={isSubmitting}
+            className="text-xs text-gray-400 hover:text-gray-600 underline disabled:opacity-50"
           >
             Cancel
           </button>
