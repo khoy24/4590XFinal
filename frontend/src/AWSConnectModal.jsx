@@ -86,15 +86,16 @@ export default function AWSConnectModal({
         {!isPolling && !isSubmitting && (
           <>
             <p className="text-sm text-gray-500 mb-2 leading-relaxed">
-              We'll open AWS CloudFormation to create a secure, limited-access role
-              in your account ({awsRegion}). Use the stack name{' '}
-              <strong>CloudAssistant</strong> from the generated link when needed.
-              Scroll to the bottom, check <strong>I acknowledge</strong>, and click{' '}
-              <strong>Create stack</strong>.
+              We'll open AWS CloudFormation to create a secure, limited-access
+              role in your account ({awsRegion}). Use the stack name{" "}
+              <strong>CloudAssistant</strong> from the generated link when
+              needed. Scroll to the bottom, check <strong>I acknowledge</strong>
+              , and click <strong>Create stack</strong>.
             </p>
             <p className="text-xs text-gray-400 mb-4">
-              Your connection persists after you log in again; you only recreate the
-              stack if you revoke it in AWS or use &quot;Forget AWS&quot; here.
+              Your connection persists after you log in again; you only recreate
+              the stack if you revoke it in AWS or use &quot;Forget AWS&quot;
+              here.
             </p>
 
             <a
@@ -122,7 +123,7 @@ export default function AWSConnectModal({
                 : "Waiting for AWS to create the role..."}
             </p>
             <p className="text-xs text-gray-400 mt-2">
-              This usually takes about 15 seconds.
+              This usually takes about 30-60 seconds.
             </p>
           </div>
         )}
