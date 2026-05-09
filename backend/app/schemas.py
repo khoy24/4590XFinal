@@ -62,6 +62,47 @@ class ConfirmPlanResponse(BaseModel):
     results: list[ActionResultItem]
 
 
+class PlanS3StarterRequest(BaseModel):
+    bucket_name: str
+    region: str | None = None
+    enable_encryption: bool = True
+    enable_versioning: bool = False
+    block_public_access: bool = True
+
+
+class PlanS3StarterResponse(BaseModel):
+    plan_id: str
+    security_plan: str
+
+
+class ConfirmS3PlanRequest(BaseModel):
+    plan_id: str
+
+
+class ConfirmS3PlanResponse(BaseModel):
+    results: list[ActionResultItem]
+
+
+class PlanEc2StarterRequest(BaseModel):
+    instance_name: str
+    region: str | None = None
+    instance_type: str = "t3.micro"
+    assign_public_ip: bool = False
+
+
+class PlanEc2StarterResponse(BaseModel):
+    plan_id: str
+    security_plan: str
+
+
+class ConfirmEc2PlanRequest(BaseModel):
+    plan_id: str
+
+
+class ConfirmEc2PlanResponse(BaseModel):
+    results: list[ActionResultItem]
+
+
 # payload for webhook
 class WebhookPayload(BaseModel):
     external_id: str
