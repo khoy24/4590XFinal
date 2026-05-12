@@ -1,8 +1,8 @@
 # 4590X Final — Cloud Deployment Assistant
 
-Friendly UI prototype for non-security professionals to work with AWS using natural language. The app connects to the user’s AWS account via a **CloudFormation-created IAM role** and **STS AssumeRole** (with an **ExternalId**). A **Gemini**-backed chat turns plain-English requests into **allowlisted** AWS API calls.
+Friendly UI prototype for non-security professionals to work with AWS using guided workflows and natural language. Users register/sign in, connect AWS through a **CloudFormation-created IAM role**, and the backend uses **STS AssumeRole** with an **ExternalId** to make allowlisted AWS API calls. A **Gemini**-backed chat answers questions and can stage simple AWS actions for explicit confirmation.
 
-## Project Proposal 
+## Project Proposal
 
 Our group will develop a friendly user interface prototype designed for non-security
 professionals to deploy systems to AWS securely. The application will leverage the Gemini API
@@ -21,32 +21,38 @@ for non-technical users.
 
 ## Architecture
 
-- **Frontend** ([`frontend`](frontend)): React + Vite. **Register/sign in**, then CloudFormation quick-create (webhook registers the Role ARN). After connect, **Guided VPC starter** submits a staged plan and confirms it from the chat panel.
-- **Backend** ([`backend`](backend)): FastAPI. **SQLite** stores accounts and encrypted IAM Role ARNs; **HttpOnly cookie** sessions; STS temporary credentials cached **in memory** per logged-in user and refreshed automatically. Gemini on `/chat`, allowlisted boto3. Writes such as `s3.create_bucket` are staged until `POST /confirm-action`. VPC starter uses `POST /plan-vpc-starter` and `POST /confirm-plan`.
+- **Frontend** (`[frontend](frontend)`): React + Vite. **Register/sign in**, then CloudFormation quick-create (webhook registers the Role ARN). After connect, **Guided VPC starter** submits a staged plan and confirms it from the chat panel.
+- **Backend** (`[backend](backend)`): FastAPI. **SQLite** stores accounts and encrypted IAM Role ARNs; **HttpOnly cookie** sessions; STS temporary credentials cached **in memory** per logged-in user and refreshed automatically. Gemini on `/chat`, allowlisted boto3. Writes such as `s3.create_bucket` are staged until `POST /confirm-action`. VPC starter uses `POST /plan-vpc-starter` and `POST /confirm-plan`.
 
 ## Authentication
 
-Users **register/login** (`POST /auth/register`, `POST /auth/login`). The backend sets `cda_session` (HttpOnly, SameSite=lax). All AWS endpoints require this cookie (`credentials: "include"` from the SPA).
+Users **register/login** (`POST /auth/register`, `POST /auth/login`). The backend sets `cda_session` (HttpOnly, SameSite=lax). All AWS endpoints require this cookie (`credentials: "include"` from the single-page application).
 
-Set **`APP_SECRET_KEY`** (≥16 chars) and **`APP_ENCRYPTION_KEY`** (Fernet — see `.env.example`) in `backend/.env`.
+Passwords are stored as bcrypt hashes. AWS Role ARNs are encrypted at rest with Fernet. Set `**APP_SECRET_KEY`** (≥16 chars) and `**APP_ENCRYPTION_KEY`** (Fernet — see `.env.example`) in `backend/.env`.
 
 ## HTTP API overview
 
-| Method | Path                        | Purpose                                                |
-| ------ | --------------------------- | ------------------------------------------------------ |
-| `POST` | `/auth/register`            | Register; sets session cookie                          |
-| `POST` | `/auth/login`               | Login; sets session cookie                             |
-| `POST` | `/auth/logout`              | Clear cookie and in-memory STS cache                   |
-| `GET`  | `/auth/me`                  | Current user or `null`                                 |
-| `GET` | `/generate-aws-link`       | CF quick-create URL (authenticated)                    |
-| `GET` | `/aws-status`               | `pending` / `role_ready` / `active` for current user   |
-| `POST` | `/verify-role`               | AssumeRole; persist encrypted role metadata            |
-| `GET`  | `/aws-connection/current`    | Restore “connected” UI after reload                    |
-| `DELETE`| `/aws-connection`           | Forget stored AWS connection for this account          |
-| `POST` | `/chat`                     | Gemini + allowlisted AWS (cookies, no session_id body) |
-| `POST` | `/confirm-action`           | Confirm staged chat write (`action_id` only)           |
-| `POST` | `/plan-vpc-starter`         | Stage VPC starter plan (`plan_id`)                   |
-| `POST` | `/confirm-plan`             | Run the staged VPC sequence                            |
+
+| Method   | Path                      | Purpose                                                |
+| -------- | ------------------------- | ------------------------------------------------------ |
+| `POST`   | `/auth/register`          | Register; sets session cookie                          |
+| `POST`   | `/auth/login`             | Login; sets session cookie                             |
+| `POST`   | `/auth/logout`            | Clear cookie and in-memory STS cache                   |
+| `GET`    | `/auth/me`                | Current user or `null`                                 |
+| `GET`    | `/generate-aws-link`      | CloudFormation quick-create URL for current user       |
+| `GET`    | `/aws-status`             | Alias for current AWS connection state                 |
+| `POST`   | `/verify-role`            | AssumeRole; persist encrypted role metadata            |
+| `GET`    | `/aws-connection/current` | Restore “connected” UI after reload                    |
+| `DELETE` | `/aws-connection`         | Forget stored AWS connection for this account          |
+| `POST`   | `/chat`                   | Gemini + allowlisted AWS (cookies, no session_id body) |
+| `POST`   | `/confirm-action`         | Confirm staged chat write (`action_id` only)           |
+| `POST`   | `/plan-vpc-starter`       | Stage VPC starter plan (`plan_id`)                     |
+| `POST`   | `/confirm-plan`           | Run the staged VPC sequence                            |
+| `POST`   | `/plan-s3-starter`        | Stage S3 bucket starter plan (`plan_id`)               |
+| `POST`   | `/confirm-s3-plan`        | Run the staged S3 bucket starter sequence              |
+| `POST`   | `/plan-ec2-starter`       | Stage EC2 starter plan (`plan_id`)                     |
+| `POST`   | `/confirm-ec2-plan`       | Run the staged EC2 starter sequence                    |
+
 
 ## Prerequisites
 
@@ -70,24 +76,28 @@ ngrok config add-authtoken your_super_long_token_here
 
 ## Environment variables
 
-### Backend ([`backend/.env.example`](backend/.env.example))
+### Backend (`[backend/.env.example](backend/.env.example)`)
 
-| Variable                 | Purpose                                                                |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `GEMINI_API_KEY`           | Google Gemini API key                                                       |
-| `AWS_BACKEND_ACCOUNT_ID` | AWS account ID trusted in the user’s role template (quick-create link)     |
-| `WEBHOOK_DOMAIN`         | Public base URL for the FastAPI webhook (e.g. ngrok URL, no trailing slash) |
-| `APP_SECRET_KEY`         | ≥16 chars; signs session cookie                                              |
-| `APP_ENCRYPTION_KEY`     | Fernet key; encrypts IAM Role ARN at rest in SQLite                           |
+
+| Variable                 | Purpose                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`         | Google Gemini API key                                                             |
+| `AWS_BACKEND_ACCOUNT_ID` | AWS account ID trusted in the user’s role template (quick-create link)            |
+| `WEBHOOK_DOMAIN`         | Public base URL for the FastAPI webhook (e.g. ngrok URL, no trailing slash)       |
+| `APP_SECRET_KEY`         | ≥16 chars; signs session cookie                                                   |
+| `APP_ENCRYPTION_KEY`     | Fernet key; encrypts IAM Role ARN at rest in SQLite                               |
 | `DATABASE_URL`           | Optional; default `sqlite:///./app.db` (created next to cwd when starting server) |
 
-The backend must persist `app.db`; run `uvicorn` from [`backend`](backend/) so SQLite path is predictable.
 
-### Frontend ([`frontend/.env.example`](frontend/.env.example))
+The backend must persist `app.db`; run `uvicorn` from `[backend](backend/)` so SQLite path is predictable.
+
+### Frontend (`[frontend/.env.example](frontend/.env.example)`)
+
 
 | Variable       | Purpose                                        |
 | -------------- | ---------------------------------------------- |
 | `VITE_API_URL` | Backend base URL, e.g. `http://127.0.0.1:8000` |
+
 
 Create `.env` files:
 
@@ -100,7 +110,7 @@ Edit both files with real values.
 
 ## Local AWS credentials for the backend
 
-The backend uses `boto3` to call AWS STS, so the **same terminal/process that runs `uvicorn`** needs AWS credentials before the app can verify a pasted Role ARN.
+The backend uses `boto3` to call AWS STS, so the **same terminal/process that runs `uvicorn`** needs AWS credentials before the app can verify the CloudFormation-created Role ARN.
 
 Do **not** use root access keys. For a local demo, create an IAM user such as `cloud-assistant-local-backend`, then attach an inline policy that allows it to assume the CloudAssistant role:
 
@@ -134,7 +144,7 @@ export AWS_DEFAULT_REGION="us-east-1"
 uvicorn main:app --reload
 ```
 
-These credentials belong to the backend host. Users should paste only the **Role ARN** from CloudFormation into the app, never long-term AWS access keys.
+These credentials belong to the backend host. Users should never paste long-term AWS access keys into the app. The Role ARN is delivered to the backend by the CloudFormation webhook and stored encrypted in SQLite.
 
 ## Install and run
 
@@ -176,28 +186,47 @@ Copy and paste this link into your WEBHOOK_DOMAIN variable in your backend .env 
 2. Choose the **default region** used for STS/boto calls after connection.
 3. Click **Connect to AWS** and open the **CloudFormation quick-create** link. Complete the stack. The stack is parameterized with an **ExternalId** tied to **your logged-in account** (reused if you reopen the modal while still disconnecting/reconnecting the same pending link).
 4. Wait in the app. When the stack finishes, a Lambda Custom Resource POSTs the **Role ARN** to `/aws-webhook`; the backend stores it **encrypted** in SQLite.
-5. The app calls **`/verify-role`**, runs **AssumeRole**, and stores **temporary** credentials only in **server memory** (refreshed automatically before expiry).
-6. After success, the sidebar shows **account ID**, **region**, and a short **role session** label. **Guided VPC starter** appears when connected.
-7. After a **backend restart**, sign in again and call **`GET /aws-connection/current`** (done automatically) — no new stack unless you **Forget AWS** or delete the stack in AWS.
+5. The app calls `**/verify-role`**, runs **AssumeRole**, and stores **temporary** credentials only in **server memory** (refreshed automatically before expiry).
+6. After success, the sidebar shows **account ID**, **region**, and a short **role session** label. The guided **VPC**, **S3**, and **EC2** starter cards appear when connected.
+7. After a **backend restart**, sign in again and call `**GET /aws-connection/current`** (done automatically). No new stack unless you **Forget AWS** or delete the stack in AWS.
 
 Use **Forget AWS connection** in the sidebar to remove the encrypted row from the app (you must still delete the CloudFormation stack in AWS to revoke IAM trust).
 
 To **fully revoke** access: delete the CloudFormation stack or the IAM role in the AWS console.
 
-## Guided VPC starter
+## Guided starter workflows
 
-For a concrete “secure network basics” demo without expecting the user to know AWS networking APIs:
+After AWS is connected, the sidebar shows three guided cards. Each card validates inputs, posts a plan to the backend, and displays a security explanation in chat. The user must click **Confirm plan** before AWS writes run.
+
+### VPC starter
+
+Creates a starter network:
 
 1. Connect AWS so the sidebar shows region and account.
 2. Fill in **project name** and optional CIDRs (defaults: `10.0.0.0/16`, public `10.0.1.0/24`, private `10.0.2.0/24`). **Region** must match the connected session (`/verify-role`).
 3. **Preview plan in chat** — the backend validates CIDR containment and overlaps, then stages a pending plan (`POST /plan-vpc-starter`).
 4. In the chat bubble, **Confirm plan** runs the sequence in AWS (`POST /confirm-plan`): VPC (DNS enabled), subnets, Internet Gateway, public routing to `0.0.0.0/0`, and Name tags.
 
-**Limits (prototype):** no rollback if a midpoint API fails; leftover resources may remain in AWS. Private subnets **do not** get a NAT Gateway or outbound routing. Pending chat writes / VPC plans are **in-memory** — backend restart clears them; the encrypted AWS connection survives in SQLite.
+### S3 bucket starter
 
-Gemini `/chat` is instructed **not** to emit EC2 VPC **write** operations; use this guided flow for provisioning.
+Creates an S3 bucket with user-selected security settings:
 
-**Operational note:** webhooks bind by `ExternalId` in SQLite. Use a stable public **WEBHOOK_DOMAIN** — if webhook hits another environment, use **Forget AWS connection** then create a fresh quick-create link.
+1. Enter a bucket name; the backend sanitizes it to a valid bucket-name shape.
+2. Choose whether to enable server-side encryption, versioning, and public-access blocking.
+3. **Preview plan in chat** stages the plan (`POST /plan-s3-starter`).
+4. **Confirm plan** runs `create_bucket`, then optional `put_public_access_block`, `put_bucket_encryption`, and `put_bucket_versioning` (`POST /confirm-s3-plan`).
+
+### EC2 starter
+
+Creates one small EC2 instance:
+
+1. Enter an instance name, choose an instance type (`t3.micro`, `t3.small`, `t3.medium`, or `t3.large`), and optionally request a public IP in a default subnet.
+2. **Preview plan in chat** stages the plan (`POST /plan-ec2-starter`).
+3. **Confirm plan** creates a security group with no inbound rules, allows outbound egress, tags the security group, selects the latest Amazon Linux 2 AMI, and runs one instance (`POST /confirm-ec2-plan`).
+
+**Limits (prototype):** no rollback if a midpoint API fails; leftover resources may remain in AWS. Private VPC subnets do **not** get a NAT Gateway or outbound routing. EC2 starter currently creates a security group and instance but does not include termination/cleanup UI. Pending chat writes and starter plans are **in-memory**. Backend restart clears staged `action_id` / `plan_id` items; the encrypted AWS connection survives in SQLite.
+
+**Operational note:** webhooks bind by `ExternalId` in SQLite. Use a stable public **WEBHOOK_DOMAIN**. If webhook hits another environment, use **Forget AWS connection** then create a fresh quick-create link.
 
 ## Common AWS setup errors
 
@@ -209,30 +238,25 @@ Gemini `/chat` is instructed **not** to emit EC2 VPC **write** operations; use t
 
 Read-only calls (list buckets, describe VPCs, etc.) run as soon as you send the chat message.
 
-- **Chat write:** **S3 `create_bucket`** is staged first — the assistant shows a **Review before running** card. Nothing executes until **Confirm**.
-- **Guided VPC:** the full VPC sequence is staged as one **plan**. **Confirm plan** runs multiple EC2 APIs in order; **Cancel** only dismisses the UI (discard the staged `plan_id` on the backend by not confirming — a new preview creates a fresh plan).
+- **Chat write:** **S3 `create_bucket`** is staged first. The assistant shows a **Review before running** card. Nothing executes until **Confirm**.
+- **Guided starters:** VPC, S3, and EC2 starter workflows are staged as one **plan**. **Confirm plan** runs multiple AWS APIs in order; **Cancel** only dismisses the UI (discard the staged `plan_id` on the backend by not confirming. A new preview creates a fresh plan).
 
 **Cancel** on a bucket card dismisses without calling AWS.
 
-APIs: `POST /confirm-action` (`action_id`) and `POST /confirm-plan` (`plan_id`) with session cookie auth — see [`backend/app/routers/chat.py`](backend/app/routers/chat.py) and [`backend/app/routers/vpc_starter.py`](backend/app/routers/vpc_starter.py).
+APIs: `POST /confirm-action` (`action_id`) and starter-specific confirm endpoints (`plan_id`) with session cookie auth — see `[backend/app/routers/chat.py](backend/app/routers/chat.py)`, `[backend/app/routers/vpc_starter.py](backend/app/routers/vpc_starter.py)`, `[backend/app/routers/s3_starter.py](backend/app/routers/s3_starter.py)`, and `[backend/app/routers/ec2_starter.py](backend/app/routers/ec2_starter.py)`.
 
 ## What the chat can do today
 
-The backend allowlist (see [`backend/app/services/aws_actions.py`](backend/app/services/aws_actions.py)) includes **read/list/describe** on S3, EC2 (`describe_instances`, `describe_security_groups`, `describe_vpcs`, `describe_route_tables`), IAM users, STS `GetCallerIdentity`, plus **S3 `create_bucket`** (staged → confirm).
+The backend allowlist (see `[backend/app/services/aws_actions.py](backend/app/services/aws_actions.py)`) includes:
 
-**VPC networking writes** (VPC, subnets, IGW, routes, tags) are **not** meant to come from Gemini; they run only via **Guided VPC starter** → `confirm-plan`.
+- **S3:** list buckets; create buckets; configure bucket encryption, versioning, and public access block; read bucket security settings.
+- **EC2:** describe instances, security groups, VPCs, route tables, images, and subnets; selected VPC starter writes; create security groups; authorize egress; run instances; create tags.
+- **IAM:** list/get users.
+- **STS:** get caller identity.
+
+Gemini `/chat` should prefer read-only describe/list operations. Mutating operations from chat are staged for confirmation. Larger provisioning tasks are intended to run through the guided starter cards.
 
 Anything outside the allowlist is rejected.
-
-## Demo script (class)
-
-1. Explain the problem: AWS security setup is hard for non-experts.
-2. Show **sign in + Connect to AWS**: CloudFormation + ExternalId + encrypted Role ARN + AssumeRole.
-3. Point out **account / region / ARN** after connect.
-4. Ask the assistant to **list S3 buckets** or **describe VPCs** (read-only; runs immediately).
-5. Optionally run **Guided VPC starter**: preview plan in chat → **Confirm plan**, then inspect **account / VPC / subnet IDs** in the results list.
-6. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel).
-7. Mention **safety boundaries**: allowlisted APIs only, staged writes/plans + confirmation, temporary creds, least-privilege role template (`role-template.yaml`), revoke via stack deletion.
 
 ## Gemini / privacy
 
@@ -242,6 +266,4 @@ To help with quality and improve our products, human reviewers may read, annotat
 
 ## IAM template in repo
 
-[`backend/role-template.yaml`](backend/role-template.yaml) grants an **inline** least-privilege policy aligned with this prototype: STS `GetCallerIdentity`, narrow S3, EC2 reads + VPC-starter writes, and IAM **read-only** listing/get user. Broad managed policies (**not** CloudFormation administrative access on this role) are intentionally omitted—the stack is created **by the user in the AWS console**, not via this IAM role.
-
-The quick-create URL in the app points at an S3-hosted copy of this template — **upload the updated YAML** there if your demo uses hosted quick-create ([`backend/app/routers/aws_auth.py`](backend/app/routers/aws_auth.py) `template_url`).
+`[backend/role-template.yaml](backend/role-template.yaml)` grants an **inline** policy aligned with this prototype: STS `GetCallerIdentity`, selected S3 APIs, EC2 read APIs, VPC starter writes, EC2 starter writes, and IAM **read-only** listing/get user. Broad managed policies and CloudFormation administrative access are intentionally omitted from the assumed role. The stack is created **by the user in the AWS console**, not by this role.
