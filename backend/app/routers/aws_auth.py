@@ -53,7 +53,8 @@ def _quick_create_link(external_id: str) -> str:
             detail="AWS_BACKEND_ACCOUNT_ID is not configured.",
         )
     template_url = (
-        "https://cloud-assistant-template-1.s3.us-east-1.amazonaws.com/template.yaml"
+        #"https://cloud-assistant-template-1.s3.us-east-1.amazonaws.com/template.yaml"
+        "https://cloud-assistant-templates-chris-459x.s3.us-east-1.amazonaws.com/template.yaml"
     )
     encoded_url = urllib.parse.quote(template_url)
     webhook_base = _ensure_webhook_domain()
@@ -209,6 +210,15 @@ def aws_connection_current(
         "user_arn": mask_arn_display(entry.get("user_arn") or conn.user_arn),
         "region": conn.region,
     }
+
+
+@router.get("/aws-status")
+def aws_status(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    # Alias for /aws-connection/current to support frontend calls
+    return aws_connection_current(user, db)
 
 
 @router.delete("/aws-connection")

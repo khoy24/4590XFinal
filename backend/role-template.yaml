@@ -70,6 +70,14 @@ Resources:
                     "ec2:CreateRoute",
                     "ec2:AssociateRouteTable",
                     "ec2:CreateTags",
+
+                    "ec2:CreateSecurityGroup",
+                    "ec2:AuthorizeSecurityGroupEgress",
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "ec2:RunInstances",
+                    "ec2:TerminateInstances",
+                    "ec2:DescribeKeyPairs",
+                    "ec2:DescribeImages"
                   ]
                 Resource: "*"
               - Sid: IAMReadDemo

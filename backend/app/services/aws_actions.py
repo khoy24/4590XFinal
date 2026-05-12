@@ -5,13 +5,24 @@ from botocore.exceptions import ClientError
 
 # only these can be used
 ALLOWED_AWS_ACTIONS: dict[str, frozenset[str]] = {
-    "s3": frozenset({"list_buckets", "create_bucket"}),
+    "s3": frozenset({
+        "list_buckets",
+        "create_bucket",
+        "put_bucket_encryption",
+        "put_bucket_versioning",
+        "put_public_access_block",
+        "get_bucket_encryption",
+        "get_bucket_versioning",
+        "get_public_access_block",
+    }),
     "ec2": frozenset(
         {
             "describe_instances",
             "describe_security_groups",
             "describe_vpcs",
             "describe_route_tables",
+            "describe_images",
+            "describe_subnets",
             "create_vpc",
             "modify_vpc_attribute",
             "create_subnet",
@@ -20,6 +31,9 @@ ALLOWED_AWS_ACTIONS: dict[str, frozenset[str]] = {
             "create_route_table",
             "create_route",
             "associate_route_table",
+            "create_security_group",
+            "authorize_security_group_egress",
+            "run_instances",
             "create_tags",
         }
     ),
@@ -31,6 +45,9 @@ ALLOWED_AWS_ACTIONS: dict[str, frozenset[str]] = {
 CONFIRMATION_REQUIRED_OPS: frozenset[tuple[str, str]] = frozenset(
     {
         ("s3", "create_bucket"),
+        ("s3", "put_bucket_encryption"),
+        ("s3", "put_bucket_versioning"),
+        ("s3", "put_public_access_block"),
         ("ec2", "create_vpc"),
         ("ec2", "modify_vpc_attribute"),
         ("ec2", "create_subnet"),
@@ -39,6 +56,9 @@ CONFIRMATION_REQUIRED_OPS: frozenset[tuple[str, str]] = frozenset(
         ("ec2", "create_route_table"),
         ("ec2", "create_route"),
         ("ec2", "associate_route_table"),
+        ("ec2", "create_security_group"),
+        ("ec2", "authorize_security_group_egress"),
+        ("ec2", "run_instances"),
         ("ec2", "create_tags"),
     }
 )
@@ -72,6 +92,17 @@ def risk_summary_for_action(
             f"This will create a new S3 bucket named {name} in your account. "
             "You may incur storage charges if objects are uploaded. "
             "Confirm only if you intend to create this bucket."
+        )
+    if service == "s3" and operation in ("put_bucket_encryption", "put_bucket_versioning", "put_public_access_block"):
+        bucket = params.get("Bucket", "(unnamed)")
+        return (
+            f"This will configure security settings for S3 bucket {bucket}. "
+            "These settings help protect your data. Confirm only if you understand the implications."
+        )
+    if service == "ec2" and operation in ("create_security_group", "run_instances"):
+        return (
+            "This EC2 API call launches compute resources in your AWS account. "
+            "Confirm only if you intend to provision an instance."
         )
     if service == "ec2":
         op_label = operation.replace("_", " ")
@@ -166,6 +197,15 @@ def summarize_response(service: str, operation: str, out: dict[str, Any]) -> Any
             "AssociationId": out.get("AssociationId"),
             "RouteTableId": out.get("RouteTableId"),
             "SubnetId": out.get("SubnetId"),
+        }
+    if service == "ec2" and operation == "create_security_group":
+        sg = out.get("GroupId")
+        return {"GroupId": sg}
+    if service == "ec2" and operation == "run_instances":
+        instances = out.get("Instances") or []
+        return {
+            "instance_count": len(instances),
+            "instance_ids": [i.get("InstanceId") for i in instances[:10]],
         }
     if service == "ec2" and operation == "create_tags":
         return {"tagged": True}

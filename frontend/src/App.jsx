@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import AWSConnectModal from "./AWSConnectModal.jsx";
 import AuthForm from "./AuthForm.jsx";
+import S3StarterCard from "./S3StarterCard.jsx";
 import VPCStarterCard from "./VPCStarterCard.jsx";
+import EC2StarterCard from "./EC2StarterCard.jsx";
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -61,12 +63,14 @@ function App() {
       actionResults: null,
       pendingActions: [],
       pendingPlan: null,
+      pendingS3Plan: null,
     },
   ]);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [confirmingActionId, setConfirmingActionId] = useState(null);
   const [confirmingPlanId, setConfirmingPlanId] = useState(null);
+  const [confirmingS3PlanId, setConfirmingS3PlanId] = useState(null);
 
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
@@ -143,6 +147,7 @@ function App() {
         actionResults: null,
         pendingActions: [],
         pendingPlan: null,
+        pendingS3Plan: null,
       },
     ]);
     await loadAwsConnection();
@@ -179,6 +184,7 @@ function App() {
         actionResults: null,
         pendingActions: [],
         pendingPlan: null,
+        pendingS3Plan: null,
       },
     ]);
   };
@@ -250,7 +256,33 @@ function App() {
         text: security_plan,
         actionResults: [],
         pendingActions: [],
-        pendingPlan: { plan_id, status: "open" },
+        pendingPlan: { plan_id, plan_type: "vpc", status: "open" },
+      },
+    ]);
+  };
+
+  const handleS3PlanCreated = ({ plan_id, security_plan }) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "bot",
+        text: security_plan,
+        actionResults: [],
+        pendingActions: [],
+        pendingPlan: { plan_id, plan_type: "s3", status: "open" },
+      },
+    ]);
+  };
+
+  const handleEc2PlanCreated = ({ plan_id, security_plan }) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "bot",
+        text: security_plan,
+        actionResults: [],
+        pendingActions: [],
+        pendingPlan: { plan_id, plan_type: "ec2", status: "open" },
       },
     ]);
   };
@@ -277,7 +309,13 @@ function App() {
       return;
     setConfirmingPlanId(planPayload.plan_id);
     try {
-      const response = await fetch(`${API_BASE}/confirm-plan`, {
+      const endpoint =
+        planPayload.plan_type === "ec2"
+          ? "confirm-ec2-plan"
+          : planPayload.plan_type === "s3"
+          ? "confirm-s3-plan"
+          : "confirm-plan";
+      const response = await fetch(`${API_BASE}/${endpoint}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -296,12 +334,26 @@ function App() {
           return null;
         })();
         if (response.status === 401) resetAwsUi();
-        throw new Error(detailStr || `Confirm plan failed (${response.status}).`);
+        throw new Error(
+          detailStr || `Confirm ${planPayload.plan_type || "plan"} failed (${response.status}).`,
+        );
       }
 
       const results = data.results || [];
       const okOverall =
         results.length > 0 && results.every((r) => r.ok === true);
+      const successMessage =
+        planPayload.plan_type === "ec2"
+          ? okOverall
+            ? "EC2 starter run finished. Resource details are below."
+            : "EC2 starter run encountered errors before completion."
+          : planPayload.plan_type === "s3"
+          ? okOverall
+            ? "S3 starter run finished. Resource details are below."
+            : "S3 starter run encountered errors before completion."
+          : okOverall
+          ? "VPC starter run finished. Resource details are below."
+          : "VPC starter run encountered errors before completion.";
 
       setMessages((prev) => {
         const next = prev.map((m, i) => {
@@ -317,9 +369,7 @@ function App() {
           ...next,
           {
             role: "bot",
-            text: okOverall
-              ? "VPC starter run finished. Resource details are below."
-              : "VPC starter run encountered errors before completion.",
+            text: successMessage,
             actionResults: results,
             pendingActions: [],
             pendingPlan: null,
@@ -631,16 +681,24 @@ function App() {
           </p>
         </div>
 
-        {authUser &&
-        awsStatus === "connected" &&
-        awsRegion ? (
-          <VPCStarterCard
-            region={awsRegion}
-            disabled={
-              awsStatus !== "connected" || !awsRegion || isLoading
-            }
-            onPlanCreated={handleVpcPlanCreated}
-          />
+        {authUser && awsStatus === "connected" && awsRegion ? (
+          <div className="space-y-6">
+            <VPCStarterCard
+              region={awsRegion}
+              disabled={awsStatus !== "connected" || !awsRegion || isLoading}
+              onPlanCreated={handleVpcPlanCreated}
+            />
+            <S3StarterCard
+              region={awsRegion}
+              disabled={awsStatus !== "connected" || !awsRegion || isLoading}
+              onPlanCreated={handleS3PlanCreated}
+            />
+            <EC2StarterCard
+              region={awsRegion}
+              disabled={awsStatus !== "connected" || !awsRegion || isLoading}
+              onPlanCreated={handleEc2PlanCreated}
+            />
+          </div>
         ) : null}
       </aside>
 
@@ -673,11 +731,10 @@ function App() {
                       <div className="mt-3 pt-3 border-t border-black/10">
                         <div className="rounded-lg bg-white/90 p-3 text-left text-xs text-gray-800 ring-1 ring-black/10 space-y-2">
                           <p className="font-semibold text-amber-900">
-                            Review VPC plan
+                            Review {msg.pendingPlan.plan_type === "ec2" ? "EC2" : msg.pendingPlan.plan_type === "s3" ? "S3" : "VPC"} plan
                           </p>
                           <p className="text-gray-700 leading-relaxed">
-                            One confirmation runs the full VPC sequence in AWS
-                            (multiple API calls).
+                            One confirmation runs the full {msg.pendingPlan.plan_type === "ec2" ? "EC2 starter" : msg.pendingPlan.plan_type === "s3" ? "S3 starter" : "VPC starter"} sequence in AWS (multiple API calls).
                           </p>
                           <div className="flex gap-2 justify-end pt-1">
                             <button
