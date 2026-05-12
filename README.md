@@ -119,7 +119,7 @@ Do **not** use root access keys. For a local demo, create an IAM user such as `c
 
 Then create an access key for that IAM user.
 
-If the AWS CLI is installed, configure the credentials:
+If the AWS CLI is installed, configure the credentials. When it asks for file type, simply leave it blank (it is json by default) and press 'ENTER', or type 'json':
 
 ```bash
 aws configure
