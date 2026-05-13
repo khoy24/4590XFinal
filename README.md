@@ -258,6 +258,16 @@ Gemini `/chat` should prefer read-only describe/list operations. Mutating operat
 
 Anything outside the allowlist is rejected.
 
+## Our Demo Script for Class (followable and reproducible)
+
+1. Explain the problem: AWS security setup is hard for non-experts.
+2. Show **sign in + Connect to AWS**: CloudFormation + ExternalId + encrypted Role ARN + AssumeRole.
+3. Point out **account / region / ARN** after connect.
+4. Ask the assistant to **list S3 buckets** or **describe VPCs** (read-only; runs immediately).
+5. Optionally run **Guided VPC starter**: preview plan in chat → **Confirm plan**, then inspect **account / VPC / subnet IDs** in the results list.
+6. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel).
+7. Mention **safety boundaries**: allowlisted APIs only, staged writes/plans + confirmation, temporary creds, least-privilege role template (`role-template.yaml`), revoke via stack deletion.
+
 ## Gemini / privacy
 
 When you use Unpaid Services, including, for example, Google AI Studio and the unpaid quota on Gemini API, Google uses the content you submit to the Services and any generated responses to provide, improve, and develop Google products and services and machine learning technologies, including Google's enterprise features, products, and services, consistent with our Privacy Policy.
