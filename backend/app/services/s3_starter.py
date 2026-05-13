@@ -103,9 +103,16 @@ def run_s3_starter_plan(entry: dict[str, Any], inputs: dict[str, Any]) -> list[d
     # Create bucket
     def step_create_bucket():
         params = {"Bucket": bucket_name}
+        create_bucket_client = s3
         if region != "us-east-1":
             params["CreateBucketConfiguration"] = {"LocationConstraint": region}
-        return s3.create_bucket(**params)
+        else:
+            create_bucket_client = boto_sess.client(
+                "s3",
+                region_name="us-east-1",
+                endpoint_url="https://s3.amazonaws.com",
+            )
+        return create_bucket_client.create_bucket(**params)
 
     if not exec_op("create_bucket", step_create_bucket):
         return results

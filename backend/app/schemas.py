@@ -23,10 +23,17 @@ class PendingActionItem(BaseModel):
     risk_summary: str
 
 
+class PendingPlanItem(BaseModel):
+    plan_id: str
+    plan_type: str
+    status: str = "open"
+
+
 class ChatResponse(BaseModel):
     reply: str
     action_results: list[ActionResultItem] = []
     pending_actions: list[PendingActionItem] = []
+    pending_plan: PendingPlanItem | None = None
 
 
 class VerifyRoleRequest(BaseModel):
