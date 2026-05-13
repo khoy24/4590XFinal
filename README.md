@@ -268,6 +268,8 @@ Anything outside the allowlist is rejected.
 6. Ask to **create a bucket** with a specific name — show the **pending** card, then **Confirm** (or Cancel).
 7. Mention **safety boundaries**: allowlisted APIs only, staged writes/plans + confirmation, temporary creds, least-privilege role template (`role-template.yaml`), revoke via stack deletion.
 
+[Watch the video](https://github.com/khoy24/4590XFinal/blob/main/demo459.mp4)
+
 ## Gemini / privacy
 
 When you use Unpaid Services, including, for example, Google AI Studio and the unpaid quota on Gemini API, Google uses the content you submit to the Services and any generated responses to provide, improve, and develop Google products and services and machine learning technologies, including Google's enterprise features, products, and services, consistent with our Privacy Policy.
