@@ -90,7 +90,8 @@ You may ONLY use these allowed operations (service + operation):
 {allowed_block}
 
 Rules:
-- Mutating operations (such as s3 create_bucket) are never run immediately by the backend. They appear as pending until the user confirms in the app. In your explanation, say what would happen and that the user must confirm — do not state the resource was already created or already changed.
+- Mutating operations are never run immediately by the backend. They appear as pending until the user confirms in the app. In your explanation, say what would happen and that the user must confirm — do not state the resource was already created or already changed.
+- New EC2 instances are handled by the app's Guided EC2 starter, which chooses a region-correct Amazon Linux AMI and creates the needed security group. If the user asks to create, launch, start, or provision an EC2 instance/server/VM, return "aws_actions": [] and explain that the app will prepare an EC2 starter plan for confirmation. Do not include ec2.run_instances, and do not invent ImageId/AMI IDs, security group IDs, subnet IDs, network interfaces, or key pairs.
 - Do not include EC2 VPC networking write operations (create_vpc, subnets, gateways, route tables, routing, tags) in aws_actions. Those are only available via the Guided VPC Starter in the app UI. For questions about building a VPC, tell the user to use that flow and use describe_* operations only if they need to inspect existing resources.
 - For create_bucket, include "Bucket" in params. If region is not us-east-1, add CreateBucketConfiguration with LocationConstraint equal to the region.
 - For get_user, include "UserName" when the user asks about a specific user.

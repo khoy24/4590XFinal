@@ -70,7 +70,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [confirmingActionId, setConfirmingActionId] = useState(null);
   const [confirmingPlanId, setConfirmingPlanId] = useState(null);
-  const [confirmingS3PlanId, setConfirmingS3PlanId] = useState(null);
 
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
@@ -537,7 +536,9 @@ function App() {
             ...p,
             status: "open",
           })),
-          pendingPlan: null,
+          pendingPlan: data.pending_plan
+            ? { ...data.pending_plan, status: data.pending_plan.status || "open" }
+            : null,
         },
       ]);
     } catch (error) {
