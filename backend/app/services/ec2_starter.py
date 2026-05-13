@@ -140,21 +140,21 @@ def run_ec2_starter_plan(entry: dict[str, Any], inputs: dict[str, Any]) -> list[
         sg_id = resp.get("GroupId")
         return resp
 
-    def authorize_egress():
-        return ec2.authorize_security_group_egress(
-            GroupId=sg_id,
-            IpPermissions=[
-                {
-                    "IpProtocol": "-1",
-                    "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
-                }
-            ],
-        )
+    #def authorize_egress():
+    #    return ec2.authorize_security_group_egress(
+    #        GroupId=sg_id,
+    #        IpPermissions=[
+    #            {
+    #                "IpProtocol": "-1",
+    #                "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+    #            }
+    #        ],
+    #    )
 
     if not exec_op("create_security_group", create_security_group):
         return results
-    if not exec_op("authorize_security_group_egress", authorize_egress):
-        return results
+    #if not exec_op("authorize_security_group_egress", authorize_egress):
+    #    return results
 
     def tag_security_group():
         return ec2.create_tags(

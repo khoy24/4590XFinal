@@ -139,8 +139,20 @@ def summarize_response(service: str, operation: str, out: dict[str, Any]) -> Any
         return {"Location": out.get("Location"), "Bucket": out.get("Bucket")}
     if service == "ec2" and operation == "describe_instances":
         reservations = out.get("Reservations") or []
-        count = sum(len(r.get("Instances") or []) for r in reservations)
-        return {"reservation_count": len(reservations), "instance_count": count}
+        instance_list = []
+        for res in reservations:
+            for inst in res.get("Instances") or []:
+                # extract name tag
+                tags = inst.get("Tags") or []
+                name = next((t["Value"] for t in tags if t["Key"] == "Name"), "Unnamed")
+                
+                instance_list.append({
+                    "name": name,
+                    "id": inst.get("InstanceId"),
+                    "state": inst.get("State", {}).get("Name"),
+                    "type": inst.get("InstanceType")
+                })
+        return {"instances": instance_list}
     if service == "ec2" and operation == "describe_security_groups":
         sgs = out.get("SecurityGroups") or []
         return {
